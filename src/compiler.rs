@@ -114,10 +114,20 @@ pub(crate) struct State {
 }
 
 pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: bool) -> Result<()> {
+    let original_args = args.clone();
+
     let (args, build_settings) = prepare_compiler_args(args, &mut user_settings)?;
 
     if args.compiler_inputs.is_empty() && args.linker_inputs.is_empty() {
-        bail!("No input");
+        // If there are no inputs, just pass everything through to clang.
+        // This lets us support invocations such as `wasixcc -dumpmachine`.
+        let mut command = Command::new(user_settings.llvm_location.get_tool_path(if run_cxx {
+            "clang++"
+        } else {
+            "clang"
+        }));
+        command.args(original_args);
+        return run_command(command);
     }
 
     let temp_dir = tempfile::TempDir::new().context("Failed to create temporary directory")?;
