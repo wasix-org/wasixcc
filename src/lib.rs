@@ -120,7 +120,6 @@ struct UserSettings {
     wasm_opt_flags: Vec<String>,     // key name: WASM_OPT_FLAGS
     module_kind: Option<ModuleKind>, // key name: MODULE_KIND
     wasm_exceptions: bool,           // key name: WASM_EXCEPTIONS
-    include_cpp_std: bool,           // key name: CPPSTD
 }
 
 impl UserSettings {
@@ -372,7 +371,7 @@ fn link_inputs(state: &State) -> Result<()> {
             "-lutil",
         ]);
 
-        if state.user_settings.include_cpp_std {
+        if state.cxx {
             command.args(["-lc++", "-lc++abi"]);
         }
     }
@@ -647,19 +646,12 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => false,
     };
 
-    let include_cpp_std = match try_get_user_setting_value("CPPSTD", args)? {
-        Some(value) => read_bool_user_setting(&value)
-            .with_context(|| format!("Invalid value {value} for CPPSTD"))?,
-        None => true,
-    };
-
     Ok(UserSettings {
         llvm_location,
         sysroot_location: sysroot_location.into(),
         wasm_opt_flags,
         module_kind,
         wasm_exceptions,
-        include_cpp_std,
     })
 }
 
