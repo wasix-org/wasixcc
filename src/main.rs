@@ -86,9 +86,20 @@ fn install_executables() -> Result<()> {
     Ok(())
 }
 
+fn print_version() {
+    let version = env!("CARGO_PKG_VERSION");
+
+    println!("wasixcc version: {version}");
+}
+
 fn run() -> Result<()> {
     if matches!(std::env::args().nth(1), Some(x) if x == "install-executables") {
         return install_executables();
+    }
+
+    if std::env::args().any(|arg| arg == "--version" || arg == "-v") {
+        print_version();
+        return Ok(());
     }
 
     let command_name = get_command()?;
