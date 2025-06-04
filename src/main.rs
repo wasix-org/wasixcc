@@ -93,8 +93,12 @@ fn run() -> Result<()> {
 
     let command_name = get_command()?;
     match command_name.as_str() {
-        "cc" => wasixcc::run_clang(false),
-        "++" | "cc++" => wasixcc::run_clang(true),
+        "cc" => wasixcc::run_compiler(false),
+        "++" | "cc++" => wasixcc::run_compiler(true),
+        "ld" => wasixcc::run_linker(),
+        "ar" => wasixcc::run_ar(),
+        "nm" => wasixcc::run_nm(),
+        "ranlib" => wasixcc::run_ranlib(),
         cmd => bail!("Unknown command {cmd}"),
     }
 }
