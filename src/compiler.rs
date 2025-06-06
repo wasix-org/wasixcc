@@ -25,8 +25,10 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-install_name",
         "-compatibility_version",
         "-mllvm",
+        "-mthread-model",
         "-current_version",
         "-I",
+        "-l",
         "-L",
         "-include-pch",
         "-u",
@@ -118,6 +120,8 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
 
     let (args, build_settings) = prepare_compiler_args(args, &mut user_settings)?;
 
+    tracing::info!("Compiler settings: {user_settings:?}");
+
     if args.compiler_inputs.is_empty() && args.linker_inputs.is_empty() {
         // If there are no inputs, just pass everything through to clang.
         // This lets us support invocations such as `wasixcc -dumpmachine`.
@@ -164,6 +168,8 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
         );
     }
 
+    tracing::info!("Linker settings: {user_settings:?}");
+
     if args.linker_inputs.is_empty() {
         bail!("No input");
     }
@@ -199,9 +205,9 @@ fn output_path(state: &State) -> &Path {
         output.as_path()
     } else {
         match state.user_settings.module_kind() {
-            ModuleKind::StaticMain => Path::new("a.wasm"),
-            ModuleKind::DynamicMain => Path::new("a.wasm"),
-            ModuleKind::SharedLibrary => Path::new("liba.so"),
+            ModuleKind::StaticMain | ModuleKind::DynamicMain | ModuleKind::SharedLibrary => {
+                Path::new("a.out")
+            }
             ModuleKind::ObjectFile => Path::new("a.o"),
         }
     }
@@ -215,7 +221,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
     let mut command_args: Vec<&OsStr> = vec![
         OsStr::new("--sysroot"),
-        state.user_settings.sysroot_location.as_os_str(),
+        state.user_settings.sysroot_location().as_os_str(),
         OsStr::new("--target=wasm32-wasi"),
         OsStr::new("-c"),
         OsStr::new("-matomics"),
@@ -230,11 +236,19 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
 
+    command_args.extend(
+        state
+            .user_settings
+            .extra_compiler_flags
+            .iter()
+            .map(OsStr::new),
+    );
+
     if state.user_settings.wasm_exceptions {
         command_args.push(OsStr::new("-fwasm-exceptions"));
     }
 
-    if state.user_settings.module_kind().requires_pic() {
+    if state.user_settings.module_kind().requires_pic() || state.user_settings.pic {
         command_args.push(OsStr::new("-fPIC"));
         command_args.push(OsStr::new("-ftls-model=global-dynamic"));
         command_args.push(OsStr::new("-fvisibility=default"));
@@ -288,6 +302,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
         command.args(&command_args);
         command.args(&state.args.compiler_inputs);
+        command.arg("-o").arg(output_path(state));
 
         run_command(command)?;
     }
@@ -298,7 +313,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 fn link_inputs(state: &State) -> Result<()> {
     let linker_path = state.user_settings.llvm_location.get_tool_path("wasm-ld");
 
-    let sysroot_lib_path = state.user_settings.sysroot_location.join("lib");
+    let sysroot_lib_path = state.user_settings.sysroot_location().join("lib");
     let sysroot_lib_wasm32_path = sysroot_lib_path.join("wasm32-wasi");
 
     let mut command = Command::new(linker_path);
@@ -315,6 +330,8 @@ fn link_inputs(state: &State) -> Result<()> {
         "--export-dynamic",
         "--export=__wasm_call_ctors",
     ]);
+
+    command.args(&state.user_settings.extra_linker_flags);
 
     if state.user_settings.wasm_exceptions {
         command.args(["-mllvm", "--wasm-enable-sjlj"]);
@@ -487,10 +504,16 @@ fn prepare_compiler_args(
     let mut iter = args.into_iter();
 
     while let Some(arg) = iter.next() {
-        if arg.starts_with("-Wl,") {
-            result
-                .linker_args
-                .push(arg.strip_prefix("-Wl,").unwrap().to_owned());
+        if let Some(arg) = arg.strip_prefix("-Wl,") {
+            match arg.split_once(',') {
+                Some((x, y)) => {
+                    result.linker_args.push(x.to_owned());
+                    result.linker_args.push(y.to_owned());
+                }
+                None => {
+                    result.linker_args.push(arg.to_owned());
+                }
+            }
         } else if arg == "-Xlinker" {
             let Some(next_arg) = iter.next() else {
                 bail!("Expected argument after -Xlinker");
@@ -617,6 +640,7 @@ fn prepare_linker_args(
 
 // The returned bool indicated whether the argument should be kept in the
 // compiler args.
+// TODO: update build settings from UserSettings::extra_compiler_flags as well
 fn update_build_settings_from_arg(
     arg: &str,
     build_settings: &mut BuildSettings,

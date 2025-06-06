@@ -34,16 +34,26 @@ impl LlvmLocation {
 /// compiler flags; e.g. `-fno-wasm-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
 struct UserSettings {
-    llvm_location: LlvmLocation, // key name: LLVM_LOCATION
     // TODO: implement automatic detection of sysroot kind, e.g. eh+pic vs eh
-    sysroot_location: PathBuf,       // key name: SYSROOT
-    force_wasm_opt: bool,            // key name: FORCE_WASM_OPT
-    wasm_opt_flags: Vec<String>,     // key name: WASM_OPT_FLAGS
-    module_kind: Option<ModuleKind>, // key name: MODULE_KIND
-    wasm_exceptions: bool,           // key name: WASM_EXCEPTIONS
+    sysroot_location: Option<PathBuf>, // key name: SYSROOT
+    llvm_location: LlvmLocation,       // key name: LLVM_LOCATION
+    extra_compiler_flags: Vec<String>, // key name: COMPILER_FLAGS
+    extra_linker_flags: Vec<String>,   // key name: LINKER_FLAGS
+    force_wasm_opt: bool,              // key name: FORCE_WASM_OPT
+    wasm_opt_flags: Vec<String>,       // key name: WASM_OPT_FLAGS
+    module_kind: Option<ModuleKind>,   // key name: MODULE_KIND
+    wasm_exceptions: bool,             // key name: WASM_EXCEPTIONS
+    pic: bool,                         // key name: PIC
 }
 
 impl UserSettings {
+    pub fn sysroot_location(&self) -> &Path {
+        self.sysroot_location.as_deref().expect(
+            "wasixcc currently requires a user-provided sysroot to run. \
+            Please set it using -sSYSROOT=path or WASIXCC_SYSROOT environment variable.",
+        )
+    }
+
     pub fn module_kind(&self) -> ModuleKind {
         self.module_kind.unwrap_or(ModuleKind::StaticMain)
     }
@@ -126,11 +136,16 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => LlvmLocation::FromSystem(20),
     };
 
-    let Some(sysroot_location) = try_get_user_setting_value("SYSROOT", args)? else {
-        bail!(
-            "wasixcc currently requires a user-provided sysroot to run. \
-            Please set it using -sSYSROOT=path or WASIXCC_SYSROOT environment variable."
-        );
+    let sysroot_location = try_get_user_setting_value("SYSROOT", args)?;
+
+    let extra_compiler_flags = match try_get_user_setting_value("COMPILER_FLAGS", args)? {
+        Some(flags) => read_string_list_user_setting(&flags),
+        None => vec![],
+    };
+
+    let extra_linker_flags = match try_get_user_setting_value("LINKER_FLAGS", args)? {
+        Some(flags) => read_string_list_user_setting(&flags),
+        None => vec![],
     };
 
     let force_wasm_opt = match try_get_user_setting_value("FORCE_WASM_OPT", args)? {
@@ -140,7 +155,7 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     };
 
     let wasm_opt_flags = match try_get_user_setting_value("WASM_OPT_FLAGS", args)? {
-        Some(flags) => flags.split(',').map(|f| f.trim().to_owned()).collect(),
+        Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
@@ -161,14 +176,58 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => false,
     };
 
+    let pic = match try_get_user_setting_value("PIC", args)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for PIC"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
+        sysroot_location: sysroot_location.map(Into::into),
         llvm_location,
-        sysroot_location: sysroot_location.into(),
+        extra_compiler_flags,
+        extra_linker_flags,
         force_wasm_opt,
         wasm_opt_flags,
         module_kind,
         wasm_exceptions,
+        pic,
     })
+}
+
+fn read_string_list_user_setting(value: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut chars = value.chars();
+
+    let mut push_current = |current: &mut String| {
+        let trimmed = current.trim().to_owned();
+        if !trimmed.is_empty() {
+            result.push(current.trim().to_owned())
+        }
+        current.clear();
+    };
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next() {
+                Some(':') => current.push(':'),
+                Some(ch) => {
+                    current.push('\\');
+                    current.push(ch);
+                }
+                None => current.push('\\'),
+            },
+
+            ':' => push_current(&mut current),
+
+            ch => current.push(ch),
+        }
+    }
+
+    push_current(&mut current);
+
+    result
 }
 
 fn read_bool_user_setting(value: &str) -> Option<bool> {
