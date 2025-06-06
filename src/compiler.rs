@@ -689,3 +689,136 @@ fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
         _ => None, // Default to static main if no extension matches
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LlvmLocation, UserSettings};
+    use std::{ffi::OsStr, path::PathBuf};
+
+    #[test]
+    fn test_deduce_module_kind() {
+        assert_eq!(
+            deduce_module_kind(OsStr::new("o")),
+            Some(ModuleKind::ObjectFile)
+        );
+        assert_eq!(
+            deduce_module_kind(OsStr::new("so")),
+            Some(ModuleKind::SharedLibrary)
+        );
+        assert_eq!(deduce_module_kind(OsStr::new("unknown")), None);
+    }
+
+    #[test]
+    fn test_update_build_settings_from_arg() {
+        let mut bs = BuildSettings {
+            opt_level: OptLevel::O0,
+            debug_level: DebugLevel::None,
+            use_wasm_opt: true,
+        };
+        let mut us = UserSettings {
+            sysroot_location: None,
+            llvm_location: LlvmLocation::FromSystem(0),
+            extra_compiler_flags: vec![],
+            extra_linker_flags: vec![],
+            force_wasm_opt: false,
+            wasm_opt_flags: vec![],
+            module_kind: None,
+            wasm_exceptions: false,
+            pic: false,
+        };
+        assert!(update_build_settings_from_arg("-O3", &mut bs, &mut us).unwrap());
+        assert_eq!(bs.opt_level, OptLevel::O3);
+        assert!(update_build_settings_from_arg("-g1", &mut bs, &mut us).unwrap());
+        assert_eq!(bs.debug_level, DebugLevel::G1);
+        assert!(!update_build_settings_from_arg("--no-wasm-opt", &mut bs, &mut us).unwrap());
+        assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
+        assert!(us.wasm_exceptions);
+        assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
+        assert!(!us.wasm_exceptions);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_and_build_settings() {
+        let mut us = UserSettings {
+            sysroot_location: None,
+            llvm_location: LlvmLocation::FromSystem(0),
+            extra_compiler_flags: vec![],
+            extra_linker_flags: vec![],
+            force_wasm_opt: false,
+            wasm_opt_flags: vec![],
+            module_kind: None,
+            wasm_exceptions: false,
+            pic: false,
+        };
+        let args = vec![
+            "-O2".to_string(),
+            "-g0".to_string(),
+            "-fwasm-exceptions".to_string(),
+            "--no-wasm-opt".to_string(),
+            "-Wl,-foo,bar".to_string(),
+            "-Xlinker".to_string(),
+            "baz".to_string(),
+            "-z".to_string(),
+            "zo".to_string(),
+            "-o".to_string(),
+            "out".to_string(),
+            "in.c".to_string(),
+            "lib.o".to_string(),
+        ];
+        let (pa, bs) = prepare_compiler_args(args, &mut us).unwrap();
+        assert_eq!(bs.opt_level, OptLevel::O2);
+        assert_eq!(bs.debug_level, DebugLevel::G0);
+        assert!(!bs.use_wasm_opt);
+        assert!(us.wasm_exceptions);
+        assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
+        assert_eq!(
+            pa.linker_args,
+            vec![
+                "-foo".to_string(),
+                "bar".to_string(),
+                "baz".to_string(),
+                "-z".to_string(),
+                "zo".to_string()
+            ]
+        );
+        assert_eq!(pa.output, Some(PathBuf::from("out")));
+        assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
+        assert_eq!(pa.linker_inputs, vec![PathBuf::from("lib.o")]);
+    }
+
+    #[test]
+    fn test_prepare_linker_args() {
+        let mut us = UserSettings {
+            sysroot_location: None,
+            llvm_location: LlvmLocation::FromSystem(0),
+            extra_compiler_flags: vec![],
+            extra_linker_flags: vec![],
+            force_wasm_opt: false,
+            wasm_opt_flags: vec![],
+            module_kind: None,
+            wasm_exceptions: false,
+            pic: false,
+        };
+        let args = vec![
+            "-o".to_string(),
+            "out.wasm".to_string(),
+            "-shared".to_string(),
+            "-m".to_string(),
+            "module".to_string(),
+            "mod.wasm".to_string(),
+        ];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+        assert_eq!(pa.output, Some(PathBuf::from("out.wasm")));
+        assert_eq!(
+            pa.linker_args,
+            vec![
+                "-shared".to_string(),
+                "-m".to_string(),
+                "module".to_string()
+            ]
+        );
+        assert_eq!(pa.linker_inputs, vec![PathBuf::from("mod.wasm")]);
+        assert_eq!(us.module_kind, Some(ModuleKind::SharedLibrary));
+    }
+}
