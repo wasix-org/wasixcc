@@ -253,3 +253,124 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
 
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::ModuleKind;
+    use std::{env, fs, path::PathBuf, process::Command};
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_read_string_list_user_setting() {
+        let value = "a:b\\:c:d";
+        let list = read_string_list_user_setting(value);
+        assert_eq!(list, vec!["a", "b:c", "d"]);
+    }
+
+    #[test]
+    fn test_read_bool_user_setting() {
+        assert_eq!(read_bool_user_setting("1"), Some(true));
+        assert_eq!(read_bool_user_setting("true"), Some(true));
+        assert_eq!(read_bool_user_setting("Yes"), Some(true));
+        assert_eq!(read_bool_user_setting("0"), Some(false));
+        assert_eq!(read_bool_user_setting("false"), Some(false));
+        assert_eq!(read_bool_user_setting("No"), Some(false));
+        assert_eq!(read_bool_user_setting("invalid"), None);
+    }
+
+    #[test]
+    fn test_separate_user_settings_args() {
+        let args = vec![
+            "-sA=1".to_string(),
+            "-c".to_string(),
+            "-sB=2".to_string(),
+            "file.c".to_string(),
+        ];
+        let (settings, rest) = separate_user_settings_args(args.clone());
+        assert_eq!(settings, vec!["-sA=1".to_string(), "-sB=2".to_string()]);
+        assert_eq!(rest, vec!["-c".to_string(), "file.c".to_string()]);
+    }
+
+    #[test]
+    fn test_try_get_user_setting_value_arg_and_env() {
+        let args = vec!["-sFOO=bar".to_string()];
+        env::remove_var("WASIXCC_FOO");
+        let got = try_get_user_setting_value("FOO", &args).unwrap();
+        assert_eq!(got, Some("bar".to_string()));
+        // fallback to env
+        let args2: Vec<String> = Vec::new();
+        env::set_var("WASIXCC_FOO", "baz");
+        let got2 = try_get_user_setting_value("FOO", &args2).unwrap();
+        assert_eq!(got2, Some("baz".to_string()));
+    }
+
+    #[test]
+    fn test_gather_user_settings() {
+        let args = vec![
+            "-sSYSROOT=/sys".to_string(),
+            "-sCOMPILER_FLAGS=a:b".to_string(),
+            "-sLINKER_FLAGS=x:y".to_string(),
+            "-sFORCE_WASM_OPT=1".to_string(),
+            "-sWASM_OPT_FLAGS=m:n".to_string(),
+            "-sMODULE_KIND=shared-library".to_string(),
+            "-sWASM_EXCEPTIONS=yes".to_string(),
+            "-sPIC=false".to_string(),
+        ];
+        env::remove_var("WASIXCC_LINKER_FLAGS");
+        let settings = gather_user_settings(&args).unwrap();
+        assert_eq!(settings.sysroot_location, Some(PathBuf::from("/sys")));
+        assert_eq!(
+            settings.extra_compiler_flags,
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            settings.extra_linker_flags,
+            vec!["x".to_string(), "y".to_string()]
+        );
+        assert!(settings.force_wasm_opt);
+        assert_eq!(
+            settings.wasm_opt_flags,
+            vec!["m".to_string(), "n".to_string()]
+        );
+        assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
+        assert!(settings.wasm_exceptions);
+        assert!(!settings.pic);
+    }
+
+    #[test]
+    fn test_run_command_success_and_failure() {
+        // assume 'true' and 'false' are available on PATH
+        run_command(Command::new("true")).unwrap();
+        let err = run_command(Command::new("false")).unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("Command failed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_run_tool_with_passthrough_args() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let bin = tmp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let tool_path = bin.join("dummytool");
+        fs::write(&tool_path, "#!/bin/sh\nexit 0").unwrap();
+        let mut perm = fs::metadata(&tool_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        fs::set_permissions(&tool_path, perm).unwrap();
+        let user_settings = UserSettings {
+            sysroot_location: None,
+            llvm_location: LlvmLocation::FromPath(bin.clone()),
+            extra_compiler_flags: vec![],
+            extra_linker_flags: vec![],
+            force_wasm_opt: false,
+            wasm_opt_flags: vec![],
+            module_kind: None,
+            wasm_exceptions: false,
+            pic: false,
+        };
+        run_tool_with_passthrough_args("dummytool", vec!["X".into(), "Y".into()], user_settings)
+            .unwrap();
+    }
+}
