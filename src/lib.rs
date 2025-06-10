@@ -39,7 +39,7 @@ struct UserSettings {
     llvm_location: LlvmLocation,       // key name: LLVM_LOCATION
     extra_compiler_flags: Vec<String>, // key name: COMPILER_FLAGS
     extra_linker_flags: Vec<String>,   // key name: LINKER_FLAGS
-    force_wasm_opt: bool,              // key name: FORCE_WASM_OPT
+    run_wasm_opt: Option<bool>,        // key name: RUN_WASM_OPT
     wasm_opt_flags: Vec<String>,       // key name: WASM_OPT_FLAGS
     module_kind: Option<ModuleKind>,   // key name: MODULE_KIND
     wasm_exceptions: bool,             // key name: WASM_EXCEPTIONS
@@ -148,10 +148,12 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => vec![],
     };
 
-    let force_wasm_opt = match try_get_user_setting_value("FORCE_WASM_OPT", args)? {
-        Some(value) => read_bool_user_setting(&value)
-            .with_context(|| format!("Invalid value {value} for FORCE_WASM_OPT"))?,
-        None => false,
+    let run_wasm_opt = match try_get_user_setting_value("RUN_WASM_OPT", args)? {
+        Some(value) => Some(
+            read_bool_user_setting(&value)
+                .with_context(|| format!("Invalid value {value} for RUN_WASM_OPT"))?,
+        ),
+        None => None,
     };
 
     let wasm_opt_flags = match try_get_user_setting_value("WASM_OPT_FLAGS", args)? {
@@ -187,7 +189,7 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         llvm_location,
         extra_compiler_flags,
         extra_linker_flags,
-        force_wasm_opt,
+        run_wasm_opt,
         wasm_opt_flags,
         module_kind,
         wasm_exceptions,
@@ -311,7 +313,7 @@ mod tests {
             "-sSYSROOT=/sys".to_string(),
             "-sCOMPILER_FLAGS=a:b".to_string(),
             "-sLINKER_FLAGS=x:y".to_string(),
-            "-sFORCE_WASM_OPT=1".to_string(),
+            "-sRUN_WASM_OPT=1".to_string(),
             "-sWASM_OPT_FLAGS=m:n".to_string(),
             "-sMODULE_KIND=shared-library".to_string(),
             "-sWASM_EXCEPTIONS=yes".to_string(),
@@ -328,7 +330,7 @@ mod tests {
             settings.extra_linker_flags,
             vec!["x".to_string(), "y".to_string()]
         );
-        assert!(settings.force_wasm_opt);
+        assert_eq!(settings.run_wasm_opt, Some(true));
         assert_eq!(
             settings.wasm_opt_flags,
             vec!["m".to_string(), "n".to_string()]
@@ -364,7 +366,7 @@ mod tests {
             llvm_location: LlvmLocation::FromPath(bin.clone()),
             extra_compiler_flags: vec![],
             extra_linker_flags: vec![],
-            force_wasm_opt: false,
+            run_wasm_opt: None,
             wasm_opt_flags: vec![],
             module_kind: None,
             wasm_exceptions: false,

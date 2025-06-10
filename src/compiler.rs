@@ -150,7 +150,18 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
         link_inputs(&state)?;
     }
 
-    if state.user_settings.module_kind().is_binary() && state.build_settings.use_wasm_opt {
+    // Run wasm-opt if:
+    //  * Explicitly enabled in the user settings, or
+    //  * It wasn't disabled in the compiler flags AND it wasn't explicitly disabled in the user settings
+    if state.user_settings.module_kind().is_binary()
+        && matches!(
+            (
+                state.build_settings.use_wasm_opt,
+                state.user_settings.run_wasm_opt,
+            ),
+            (_, Some(true)) | (true, None)
+        )
+    {
         run_wasm_opt(&state)?;
     }
 
@@ -159,6 +170,8 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
 }
 
 pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> Result<()> {
+    let original_args = args.clone();
+
     let args = prepare_linker_args(args, &mut user_settings)?;
 
     if !user_settings.module_kind().is_binary() {
@@ -171,13 +184,16 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
     tracing::info!("Linker settings: {user_settings:?}");
 
     if args.linker_inputs.is_empty() {
-        bail!("No input");
+        // If there are no inputs, just pass everything through to wasm-ld.
+        let mut command = Command::new(user_settings.llvm_location.get_tool_path("wasm-ld"));
+        command.args(original_args);
+        return run_command(command);
     }
 
     let build_settings = BuildSettings {
         opt_level: OptLevel::O0,
         debug_level: DebugLevel::G0,
-        use_wasm_opt: user_settings.force_wasm_opt,
+        use_wasm_opt: user_settings.run_wasm_opt.unwrap_or(true),
     };
 
     let state = State {
@@ -235,14 +251,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_SIGNAL"),
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
-
-    command_args.extend(
-        state
-            .user_settings
-            .extra_compiler_flags
-            .iter()
-            .map(OsStr::new),
-    );
 
     if state.user_settings.wasm_exceptions {
         command_args.push(OsStr::new("-fwasm-exceptions"));
@@ -302,7 +310,9 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
         command.args(&command_args);
         command.args(&state.args.compiler_inputs);
-        command.arg("-o").arg(output_path(state));
+        if let Some(output_path) = state.args.output.as_ref() {
+            command.arg("-o").arg(output_path);
+        }
 
         run_command(command)?;
     }
@@ -501,7 +511,12 @@ fn prepare_compiler_args(
         use_wasm_opt: true,
     };
 
-    let mut iter = args.into_iter();
+    let mut extra_flags = vec![];
+    std::mem::swap(&mut extra_flags, &mut user_settings.extra_compiler_flags);
+
+    // Since we used to do CC="clang --flag1 --flag2", it seems putting the extra flags
+    // first has worked for us, so we keep that behavior.
+    let mut iter = extra_flags.into_iter().chain(args);
 
     while let Some(arg) = iter.next() {
         if let Some(arg) = arg.strip_prefix("-Wl,") {
@@ -548,10 +563,14 @@ fn prepare_compiler_args(
             }
         } else {
             // Assume it's an input file
-            if arg.ends_with(".o") || arg.ends_with(".a") {
-                result.linker_inputs.push(PathBuf::from(arg));
-            } else {
-                result.compiler_inputs.push(PathBuf::from(arg));
+            let input = PathBuf::from(&arg);
+            match input.extension().and_then(|ext| ext.to_str()) {
+                Some("a") | Some("o") | Some("obj") => {
+                    result.linker_inputs.push(PathBuf::from(arg));
+                }
+                _ => {
+                    result.compiler_inputs.push(PathBuf::from(arg));
+                }
             }
         }
     }
@@ -684,7 +703,7 @@ fn update_build_settings_from_arg(
 
 fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
     match extension.to_str() {
-        Some("o") => Some(ModuleKind::ObjectFile),
+        Some("o") | Some("obj") => Some(ModuleKind::ObjectFile),
         Some("so") => Some(ModuleKind::SharedLibrary),
         _ => None, // Default to static main if no extension matches
     }
@@ -721,7 +740,7 @@ mod tests {
             llvm_location: LlvmLocation::FromSystem(0),
             extra_compiler_flags: vec![],
             extra_linker_flags: vec![],
-            force_wasm_opt: false,
+            run_wasm_opt: None,
             wasm_opt_flags: vec![],
             module_kind: None,
             wasm_exceptions: false,
@@ -745,7 +764,7 @@ mod tests {
             llvm_location: LlvmLocation::FromSystem(0),
             extra_compiler_flags: vec![],
             extra_linker_flags: vec![],
-            force_wasm_opt: false,
+            run_wasm_opt: None,
             wasm_opt_flags: vec![],
             module_kind: None,
             wasm_exceptions: false,
@@ -794,7 +813,7 @@ mod tests {
             llvm_location: LlvmLocation::FromSystem(0),
             extra_compiler_flags: vec![],
             extra_linker_flags: vec![],
-            force_wasm_opt: false,
+            run_wasm_opt: None,
             wasm_opt_flags: vec![],
             module_kind: None,
             wasm_exceptions: false,
