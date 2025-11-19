@@ -106,8 +106,8 @@ fn print_version(exe_name: &str) {
     println!("{exe_name} version: {version}");
 }
 
-fn print_sysroot() -> Result<()> {
-    let sysroot = wasixcc::get_sysroot()?;
+fn print_sysroot(args: Vec<String>, env_vars: &std::collections::HashMap<String, String>) -> Result<()> {
+    let sysroot = wasixcc::get_sysroot(args, env_vars)?;
     println!("{}", sysroot.display());
     Ok(())
 }
@@ -311,6 +311,10 @@ fn run() -> Result<()> {
 
     let command = get_wasixcc_command(&exe_name);
 
+    // Collect args and env once for all commands that need them
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: std::collections::HashMap<String, String> = std::env::vars().collect();
+
     match command {
         WasixccCommand::Help => {
             print_help(&exe_name);
@@ -321,23 +325,24 @@ fn run() -> Result<()> {
             Ok(())
         }
         WasixccCommand::InstallExecutables(path) => install_executables(path),
-        WasixccCommand::DownloadSysroot(tag_spec) => wasixcc::download_sysroot(tag_spec),
-        WasixccCommand::DownloadLlvm(tag_spec) => wasixcc::download_llvm(tag_spec),
+        WasixccCommand::DownloadSysroot(tag_spec) => wasixcc::download_sysroot(tag_spec, args, &env_vars),
+        WasixccCommand::DownloadLlvm(tag_spec) => wasixcc::download_llvm(tag_spec, args, &env_vars),
         WasixccCommand::DownloadAll => {
-            wasixcc::download_llvm(TagSpec::Latest)?;
-            wasixcc::download_sysroot(TagSpec::Latest)?;
+            let args_clone = args.clone();
+            wasixcc::download_llvm(TagSpec::Latest, args, &env_vars)?;
+            wasixcc::download_sysroot(TagSpec::Latest, args_clone, &env_vars)?;
             Ok(())
         }
-        WasixccCommand::PrintSysroot => print_sysroot(),
+        WasixccCommand::PrintSysroot => print_sysroot(args, &env_vars),
         WasixccCommand::RunTool => {
             let command_name = get_command(&exe_name)?;
             match command_name.as_str() {
-                "cc" => wasixcc::run_compiler(false),
-                "++" | "cc++" => wasixcc::run_compiler(true),
-                "ld" => wasixcc::run_linker(),
-                "ar" => wasixcc::run_ar(),
-                "nm" => wasixcc::run_nm(),
-                "ranlib" => wasixcc::run_ranlib(),
+                "cc" => wasixcc::run_compiler(args, &env_vars, false),
+                "++" | "cc++" => wasixcc::run_compiler(args, &env_vars, true),
+                "ld" => wasixcc::run_linker(args, &env_vars),
+                "ar" => wasixcc::run_ar(args, &env_vars),
+                "nm" => wasixcc::run_nm(args, &env_vars),
+                "ranlib" => wasixcc::run_ranlib(args, &env_vars),
                 cmd => bail!("Unknown command {cmd}"),
             }
         }

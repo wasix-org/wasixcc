@@ -225,7 +225,7 @@ cmake --build ...
 
 ## Using wasixcc as a Library
 
-`wasixcc` can be used as a Rust library in your own projects. All public functions have pure variants that accept arguments and environment variables as parameters, making them easy to test and use programmatically.
+`wasixcc` can be used as a Rust library in your own projects. All public functions accept arguments and environment variables as parameters, making them pure and easy to test.
 
 ### Example: Compile C code programmatically
 
@@ -250,7 +250,7 @@ fn main() -> anyhow::Result<()> {
 
     // Run the compiler with custom args and env vars
     // This doesn't read from std::env::args() or std::env::vars()
-    wasixcc::run_compiler_with(args, &env_vars, false)?;
+    wasixcc::run_compiler(args, &env_vars, false)?;
     
     Ok(())
 }
@@ -258,22 +258,18 @@ fn main() -> anyhow::Result<()> {
 
 ### Available Library Functions
 
-All public functions have two variants:
+All public functions accept arguments and environment variables as parameters:
 
-1. **Standard variant** (e.g., `run_compiler`): Reads from process environment (`std::env::args()` and `std::env::vars()`)
-2. **Pure variant** (e.g., `run_compiler_with`): Accepts arguments and environment as parameters
+- `run_compiler(args, env_vars, run_cxx)` - Compile C/C++ code
+- `run_linker(args, env_vars)` - Link object files
+- `run_ar(args, env_vars)` - Run llvm-ar
+- `run_nm(args, env_vars)` - Run llvm-nm
+- `run_ranlib(args, env_vars)` - Run llvm-ranlib
+- `get_sysroot(args, env_vars)` - Get sysroot path
+- `download_sysroot(tag_spec, args, env_vars)` - Download sysroot
+- `download_llvm(tag_spec, args, env_vars)` - Download LLVM (Linux only)
 
-Pure variants:
-- `run_compiler_with(args, env_vars, run_cxx)` - Compile C/C++ code
-- `run_linker_with(args, env_vars)` - Link object files
-- `run_ar_with(args, env_vars)` - Run llvm-ar
-- `run_nm_with(args, env_vars)` - Run llvm-nm
-- `run_ranlib_with(args, env_vars)` - Run llvm-ranlib
-- `get_sysroot_with(args, env_vars)` - Get sysroot path
-- `download_sysroot_with(tag_spec, args, env_vars)` - Download sysroot
-- `download_llvm_with(tag_spec, args, env_vars)` - Download LLVM (Linux only)
-
-The pure variants are recommended for library usage as they're easier to test and don't have hidden dependencies on the process environment.
+These functions don't read from the process environment, making them easy to test and use in library code.
 
 ## Contributing
 

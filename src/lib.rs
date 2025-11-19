@@ -148,148 +148,70 @@ fn run_tool_with_passthrough_args(
 }
 
 /// Run the compiler with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn run_compiler_with(args: Vec<String>, env_vars: &HashMap<String, String>, run_cxx: bool) -> Result<()> {
+pub fn run_compiler(args: Vec<String>, env_vars: &HashMap<String, String>, run_cxx: bool) -> Result<()> {
     tracing::info!("Starting in compiler mode");
 
     let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     compiler::run(args, user_settings, run_cxx)
 }
 
-/// Run the compiler, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `run_compiler_with` instead.
-pub fn run_compiler(run_cxx: bool) -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    run_compiler_with(args, &env_vars, run_cxx)
-}
-
 /// Run the linker with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn run_linker_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn run_linker(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in linker mode");
 
     let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     compiler::link_only(args, user_settings)
 }
 
-/// Run the linker, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `run_linker_with` instead.
-pub fn run_linker() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    run_linker_with(args, &env_vars)
-}
-
 /// Run llvm-ar with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn run_ar_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn run_ar(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in ar mode");
 
     let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-ar", args, user_settings)
 }
 
-/// Run llvm-ar, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `run_ar_with` instead.
-pub fn run_ar() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    run_ar_with(args, &env_vars)
-}
-
 /// Run llvm-nm with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn run_nm_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn run_nm(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in nm mode");
 
     let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-nm", args, user_settings)
 }
 
-/// Run llvm-nm, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `run_nm_with` instead.
-pub fn run_nm() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    run_nm_with(args, &env_vars)
-}
-
 /// Run llvm-ranlib with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn run_ranlib_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn run_ranlib(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in ranlib mode");
 
     let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-ranlib", args, user_settings)
 }
 
-/// Run llvm-ranlib, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `run_ranlib_with` instead.
-pub fn run_ranlib() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    run_ranlib_with(args, &env_vars)
-}
-
 /// Get the sysroot path with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn get_sysroot_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<PathBuf> {
+pub fn get_sysroot(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<PathBuf> {
     let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     user_settings.ensure_sysroot_location()
 }
 
-/// Get the sysroot path, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `get_sysroot_with` instead.
-pub fn get_sysroot() -> Result<PathBuf> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    get_sysroot_with(args, &env_vars)
-}
-
 /// Download the sysroot with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn download_sysroot_with(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn download_sysroot(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Downloading sysroot: {:?}", tag_spec);
 
     let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     download::download_sysroot(tag_spec, &user_settings)
 }
 
-/// Download the sysroot, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `download_sysroot_with` instead.
-pub fn download_sysroot(tag_spec: TagSpec) -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    download_sysroot_with(tag_spec, args, &env_vars)
-}
-
 #[cfg(target_os = "linux")]
 /// Download LLVM with the given arguments and environment variables.
-/// This is the pure library version that doesn't read from the process environment.
-pub fn download_llvm_with(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn download_llvm(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
 
     let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     download::download_llvm(tag_spec, &user_settings)
 }
 
-#[cfg(target_os = "linux")]
-/// Download LLVM, reading arguments and environment variables from the process environment.
-/// For library usage, prefer `download_llvm_with` instead.
-pub fn download_llvm(tag_spec: TagSpec) -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let env_vars: HashMap<String, String> = std::env::vars().collect();
-    download_llvm_with(tag_spec, args, &env_vars)
-}
-
 #[cfg(not(target_os = "linux"))]
-pub fn download_llvm(_tag_spec: TagSpec) -> Result<()> {
-    bail!("LLVM download is only supported on Linux");
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn download_llvm_with(_tag_spec: TagSpec, _args: Vec<String>, _env_vars: &HashMap<String, String>) -> Result<()> {
+pub fn download_llvm(_tag_spec: TagSpec, _args: Vec<String>, _env_vars: &HashMap<String, String>) -> Result<()> {
     bail!("LLVM download is only supported on Linux");
 }
 
@@ -643,9 +565,9 @@ mod tests {
         env_vars.insert("WASIXCC_COMPILER_FLAGS".to_string(), "-O3:-Wall".to_string());
         env_vars.insert("WASIXCC_WASM_EXCEPTIONS".to_string(), "yes".to_string());
 
-        // Test get_sysroot_with - should use the custom env vars, not process environment
+        // Test get_sysroot - should use the custom env vars, not process environment
         let args = vec![];
-        let result = get_sysroot_with(args.clone(), &env_vars);
+        let result = get_sysroot(args.clone(), &env_vars);
         // This will fail because the sysroot doesn't exist, but it proves we're using
         // the custom env vars (which specify /custom/sysroot) and not the process environment
         assert!(result.is_err());
@@ -654,7 +576,7 @@ mod tests {
 
         // Test that args override env vars
         let args_with_override = vec!["-sSYSROOT=/override/sysroot".to_string()];
-        let result = get_sysroot_with(args_with_override, &env_vars);
+        let result = get_sysroot(args_with_override, &env_vars);
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(err_msg.contains("/override/sysroot"));
