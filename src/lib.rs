@@ -114,10 +114,12 @@ impl UserSettings {
     }
 }
 
-fn get_args_and_user_settings() -> Result<(Vec<String>, UserSettings)> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+fn get_args_and_user_settings_from(
+    args: Vec<String>,
+    env_vars: &HashMap<String, String>,
+) -> Result<(Vec<String>, UserSettings)> {
     let (settings_args, args) = separate_user_settings_args(args);
-    let user_settings = gather_user_settings(&settings_args)?;
+    let user_settings = gather_user_settings_from(&settings_args, env_vars)?;
     Ok((args, user_settings))
 }
 
@@ -145,63 +147,149 @@ fn run_tool_with_passthrough_args(
     run_command(command)
 }
 
-pub fn run_compiler(run_cxx: bool) -> Result<()> {
+/// Run the compiler with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn run_compiler_with(args: Vec<String>, env_vars: &HashMap<String, String>, run_cxx: bool) -> Result<()> {
     tracing::info!("Starting in compiler mode");
 
-    let (args, user_settings) = get_args_and_user_settings()?;
+    let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     compiler::run(args, user_settings, run_cxx)
 }
 
-pub fn run_linker() -> Result<()> {
+/// Run the compiler, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `run_compiler_with` instead.
+pub fn run_compiler(run_cxx: bool) -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    run_compiler_with(args, &env_vars, run_cxx)
+}
+
+/// Run the linker with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn run_linker_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in linker mode");
 
-    let (args, user_settings) = get_args_and_user_settings()?;
+    let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     compiler::link_only(args, user_settings)
 }
 
-pub fn run_ar() -> Result<()> {
+/// Run the linker, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `run_linker_with` instead.
+pub fn run_linker() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    run_linker_with(args, &env_vars)
+}
+
+/// Run llvm-ar with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn run_ar_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in ar mode");
 
-    let (args, user_settings) = get_args_and_user_settings()?;
+    let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-ar", args, user_settings)
 }
 
-pub fn run_nm() -> Result<()> {
+/// Run llvm-ar, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `run_ar_with` instead.
+pub fn run_ar() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    run_ar_with(args, &env_vars)
+}
+
+/// Run llvm-nm with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn run_nm_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in nm mode");
 
-    let (args, user_settings) = get_args_and_user_settings()?;
+    let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-nm", args, user_settings)
 }
 
-pub fn run_ranlib() -> Result<()> {
+/// Run llvm-nm, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `run_nm_with` instead.
+pub fn run_nm() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    run_nm_with(args, &env_vars)
+}
+
+/// Run llvm-ranlib with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn run_ranlib_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Starting in ranlib mode");
 
-    let (args, user_settings) = get_args_and_user_settings()?;
+    let (args, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     run_tool_with_passthrough_args("llvm-ranlib", args, user_settings)
 }
 
-pub fn get_sysroot() -> Result<PathBuf> {
-    let (_, user_settings) = get_args_and_user_settings()?;
+/// Run llvm-ranlib, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `run_ranlib_with` instead.
+pub fn run_ranlib() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    run_ranlib_with(args, &env_vars)
+}
+
+/// Get the sysroot path with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn get_sysroot_with(args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<PathBuf> {
+    let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     user_settings.ensure_sysroot_location()
 }
 
-pub fn download_sysroot(tag_spec: TagSpec) -> Result<()> {
+/// Get the sysroot path, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `get_sysroot_with` instead.
+pub fn get_sysroot() -> Result<PathBuf> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    get_sysroot_with(args, &env_vars)
+}
+
+/// Download the sysroot with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn download_sysroot_with(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Downloading sysroot: {:?}", tag_spec);
 
-    let (_, user_settings) = get_args_and_user_settings()?;
+    let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     download::download_sysroot(tag_spec, &user_settings)
 }
 
+/// Download the sysroot, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `download_sysroot_with` instead.
+pub fn download_sysroot(tag_spec: TagSpec) -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    download_sysroot_with(tag_spec, args, &env_vars)
+}
+
 #[cfg(target_os = "linux")]
-pub fn download_llvm(tag_spec: TagSpec) -> Result<()> {
+/// Download LLVM with the given arguments and environment variables.
+/// This is the pure library version that doesn't read from the process environment.
+pub fn download_llvm_with(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<String, String>) -> Result<()> {
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
 
-    let (_, user_settings) = get_args_and_user_settings()?;
+    let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
     download::download_llvm(tag_spec, &user_settings)
+}
+
+#[cfg(target_os = "linux")]
+/// Download LLVM, reading arguments and environment variables from the process environment.
+/// For library usage, prefer `download_llvm_with` instead.
+pub fn download_llvm(tag_spec: TagSpec) -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let env_vars: HashMap<String, String> = std::env::vars().collect();
+    download_llvm_with(tag_spec, args, &env_vars)
 }
 
 #[cfg(not(target_os = "linux"))]
 pub fn download_llvm(_tag_spec: TagSpec) -> Result<()> {
+    bail!("LLVM download is only supported on Linux");
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn download_llvm_with(_tag_spec: TagSpec, _args: Vec<String>, _env_vars: &HashMap<String, String>) -> Result<()> {
     bail!("LLVM download is only supported on Linux");
 }
 
@@ -225,8 +313,8 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
     (settings_args, tool_args)
 }
 
-fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
-    let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args)? {
+fn gather_user_settings_from(args: &[String], env_vars: &HashMap<String, String>) -> Result<UserSettings> {
+    let llvm_location = match try_get_user_setting_value_from("LLVM_LOCATION", args, env_vars)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
         None => LlvmLocation::DefaultPath(
             std::env::home_dir()
@@ -235,62 +323,62 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         ),
     };
 
-    let sysroot_location = try_get_user_setting_value("SYSROOT", args)?;
+    let sysroot_location = try_get_user_setting_value_from("SYSROOT", args, env_vars)?;
 
-    let sysroot_prefix = try_get_user_setting_value("SYSROOT_PREFIX", args)?
+    let sysroot_prefix = try_get_user_setting_value_from("SYSROOT_PREFIX", args, env_vars)?
         .map(PathBuf::from)
         .or_else(|| std::env::home_dir().map(|home| home.join(".wasixcc/sysroot")))
         .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/sysroot"));
 
-    let extra_compiler_flags = match try_get_user_setting_value("COMPILER_FLAGS", args)? {
+    let extra_compiler_flags = match try_get_user_setting_value_from("COMPILER_FLAGS", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let extra_compiler_post_flags = match try_get_user_setting_value("COMPILER_POST_FLAGS", args)? {
+    let extra_compiler_post_flags = match try_get_user_setting_value_from("COMPILER_POST_FLAGS", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let extra_compiler_flags_c = match try_get_user_setting_value("COMPILER_FLAGS_C", args)? {
+    let extra_compiler_flags_c = match try_get_user_setting_value_from("COMPILER_FLAGS_C", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
     let extra_compiler_post_flags_c =
-        match try_get_user_setting_value("COMPILER_POST_FLAGS_C", args)? {
+        match try_get_user_setting_value_from("COMPILER_POST_FLAGS_C", args, env_vars)? {
             Some(flags) => read_string_list_user_setting(&flags),
             None => vec![],
         };
 
-    let extra_compiler_flags_cxx = match try_get_user_setting_value("COMPILER_FLAGS_CXX", args)? {
+    let extra_compiler_flags_cxx = match try_get_user_setting_value_from("COMPILER_FLAGS_CXX", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
     let extra_compiler_post_flags_cxx =
-        match try_get_user_setting_value("COMPILER_POST_FLAGS_CXX", args)? {
+        match try_get_user_setting_value_from("COMPILER_POST_FLAGS_CXX", args, env_vars)? {
             Some(flags) => read_string_list_user_setting(&flags),
             None => vec![],
         };
 
-    let extra_linker_flags = match try_get_user_setting_value("LINKER_FLAGS", args)? {
+    let extra_linker_flags = match try_get_user_setting_value_from("LINKER_FLAGS", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let include_cpp_symbols = match try_get_user_setting_value("INCLUDE_CPP_SYMBOLS", args)? {
+    let include_cpp_symbols = match try_get_user_setting_value_from("INCLUDE_CPP_SYMBOLS", args, env_vars)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for INCLUDE_CPP_SYMBOLS"))?,
         None => false,
     };
 
-    let wasm_opt_flags = match try_get_user_setting_value("WASM_OPT_FLAGS", args)? {
+    let wasm_opt_flags = match try_get_user_setting_value_from("WASM_OPT_FLAGS", args, env_vars)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let run_wasm_opt = match try_get_user_setting_value("RUN_WASM_OPT", args)? {
+    let run_wasm_opt = match try_get_user_setting_value_from("RUN_WASM_OPT", args, env_vars)? {
         Some(value) => Some(
             read_bool_user_setting(&value)
                 .with_context(|| format!("Invalid value {value} for RUN_WASM_OPT"))?,
@@ -306,21 +394,21 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     };
 
     let wasm_opt_suppress_default =
-        match try_get_user_setting_value("WASM_OPT_SUPPRESS_DEFAULT", args)? {
+        match try_get_user_setting_value_from("WASM_OPT_SUPPRESS_DEFAULT", args, env_vars)? {
             Some(value) => read_bool_user_setting(&value)
                 .with_context(|| format!("Invalid value {value} for WASM_OPT_SUPPRESS_DEFAULT"))?,
             None => false,
         };
 
     let wasm_opt_preserve_unoptimized =
-        match try_get_user_setting_value("WASM_OPT_PRESERVE_UNOPTIMIZED", args)? {
+        match try_get_user_setting_value_from("WASM_OPT_PRESERVE_UNOPTIMIZED", args, env_vars)? {
             Some(value) => read_bool_user_setting(&value).with_context(|| {
                 format!("Invalid value {value} for WASM_OPT_PRESERVE_UNOPTIMIZED")
             })?,
             None => false,
         };
 
-    let module_kind = match try_get_user_setting_value("MODULE_KIND", args)? {
+    let module_kind = match try_get_user_setting_value_from("MODULE_KIND", args, env_vars)? {
         Some(kind) => Some(match kind.as_str() {
             "static-main" => ModuleKind::StaticMain,
             "dynamic-main" => ModuleKind::DynamicMain,
@@ -331,19 +419,19 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => None, // Default to static main
     };
 
-    let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)? {
+    let wasm_exceptions = match try_get_user_setting_value_from("WASM_EXCEPTIONS", args, env_vars)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
         None => false,
     };
 
-    let pic = match try_get_user_setting_value("PIC", args)? {
+    let pic = match try_get_user_setting_value_from("PIC", args, env_vars)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for PIC"))?,
         None => false,
     };
 
-    let link_symbolic = match try_get_user_setting_value("LINK_SYMBOLIC", args)? {
+    let link_symbolic = match try_get_user_setting_value_from("LINK_SYMBOLIC", args, env_vars)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for LINK_SYMBOLIC"))?,
         None => true,
@@ -415,7 +503,7 @@ fn read_bool_user_setting(value: &str) -> Option<bool> {
     }
 }
 
-fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<String>> {
+fn try_get_user_setting_value_from(name: &str, args: &[String], env_vars: &HashMap<String, String>) -> Result<Option<String>> {
     for arg in args {
         if arg.starts_with(&format!("-s{}=", name)) {
             let value = arg.split('=').nth(1).unwrap();
@@ -424,8 +512,8 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
     }
 
     let env_name = format!("WASIXCC_{}", name);
-    if let Ok(env_value) = std::env::var(&env_name) {
-        return Ok(Some(env_value));
+    if let Some(env_value) = env_vars.get(&env_name) {
+        return Ok(Some(env_value.clone()));
     }
 
     Ok(None)
@@ -435,7 +523,7 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
 mod tests {
     use super::*;
     use crate::compiler::ModuleKind;
-    use std::{env, fs, path::PathBuf, process::Command};
+    use std::{fs, path::PathBuf, process::Command};
     use tempfile::TempDir;
 
     #[test]
@@ -472,13 +560,13 @@ mod tests {
     #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
         let args = vec!["-sFOO=bar".to_string()];
-        env::remove_var("WASIXCC_FOO");
-        let got = try_get_user_setting_value("FOO", &args).unwrap();
+        let mut env_vars = HashMap::new();
+        let got = try_get_user_setting_value_from("FOO", &args, &env_vars).unwrap();
         assert_eq!(got, Some("bar".to_string()));
         // fallback to env
         let args2: Vec<String> = Vec::new();
-        env::set_var("WASIXCC_FOO", "baz");
-        let got2 = try_get_user_setting_value("FOO", &args2).unwrap();
+        env_vars.insert("WASIXCC_FOO".to_string(), "baz".to_string());
+        let got2 = try_get_user_setting_value_from("FOO", &args2, &env_vars).unwrap();
         assert_eq!(got2, Some("baz".to_string()));
     }
 
@@ -494,8 +582,8 @@ mod tests {
             "-sWASM_EXCEPTIONS=yes".to_string(),
             "-sPIC=false".to_string(),
         ];
-        env::remove_var("WASIXCC_LINKER_FLAGS");
-        let settings = gather_user_settings(&args).unwrap();
+        let env_vars = HashMap::new();
+        let settings = gather_user_settings_from(&args, &env_vars).unwrap();
         assert_eq!(settings.sysroot_location, Some(PathBuf::from("/sys")));
         assert_eq!(
             settings.extra_compiler_flags,
