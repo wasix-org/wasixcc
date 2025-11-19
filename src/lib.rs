@@ -198,7 +198,7 @@ pub fn download_sysroot(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap
     tracing::info!("Downloading sysroot: {:?}", tag_spec);
 
     let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
-    download::download_sysroot(tag_spec, &user_settings)
+    download::download_sysroot(tag_spec, &user_settings, env_vars)
 }
 
 #[cfg(target_os = "linux")]
@@ -207,7 +207,7 @@ pub fn download_llvm(tag_spec: TagSpec, args: Vec<String>, env_vars: &HashMap<St
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
 
     let (_, user_settings) = get_args_and_user_settings_from(args, env_vars)?;
-    download::download_llvm(tag_spec, &user_settings)
+    download::download_llvm(tag_spec, &user_settings, env_vars)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -236,10 +236,13 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
 }
 
 fn gather_user_settings_from(args: &[String], env_vars: &HashMap<String, String>) -> Result<UserSettings> {
+    // Get home directory from HOME env var instead of std::env::home_dir()
+    let home_dir = env_vars.get("HOME").map(PathBuf::from);
+    
     let llvm_location = match try_get_user_setting_value_from("LLVM_LOCATION", args, env_vars)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
         None => LlvmLocation::DefaultPath(
-            std::env::home_dir()
+            home_dir.as_ref()
                 .map(|home| home.join(".wasixcc/llvm"))
                 .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/llvm")),
         ),
@@ -249,7 +252,7 @@ fn gather_user_settings_from(args: &[String], env_vars: &HashMap<String, String>
 
     let sysroot_prefix = try_get_user_setting_value_from("SYSROOT_PREFIX", args, env_vars)?
         .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|home| home.join(".wasixcc/sysroot")))
+        .or_else(|| home_dir.as_ref().map(|home| home.join(".wasixcc/sysroot")))
         .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/sysroot"));
 
     let extra_compiler_flags = match try_get_user_setting_value_from("COMPILER_FLAGS", args, env_vars)? {

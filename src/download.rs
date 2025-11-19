@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::Path, str::FromStr};
+use std::{collections::HashMap, fmt::Display, path::Path, str::FromStr};
 
 use anyhow::{bail, Context};
 use fs_extra::dir::CopyOptions;
@@ -62,6 +62,7 @@ impl Display for TagSpecGithubUrlPostfix<'_> {
 pub(crate) fn download_sysroot(
     tag_spec: TagSpec,
     user_settings: &UserSettings,
+    env_vars: &HashMap<String, String>,
 ) -> anyhow::Result<()> {
     if user_settings.sysroot_location.is_some() {
         tracing::warn!("SYSROOT_LOCATION is ignored when downloading sysroot");
@@ -71,8 +72,8 @@ pub(crate) fn download_sysroot(
 
     // Use API token if specified via env var.
     // Prevents 403 errors when IP is throttled by Github API.
-    let gh_token = std::env::var("GITHUB_TOKEN")
-        .ok()
+    let gh_token = env_vars
+        .get("GITHUB_TOKEN")
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty());
 
@@ -121,7 +122,7 @@ pub(crate) fn download_sysroot(
 
 // TODO: support other operating systems in the future.
 #[cfg(target_os = "linux")]
-pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> anyhow::Result<()> {
+pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings, env_vars: &HashMap<String, String>) -> anyhow::Result<()> {
     let target_dir = match user_settings.llvm_location {
         crate::LlvmLocation::DefaultPath(ref path)
         | crate::LlvmLocation::UserProvided(ref path) => path,
@@ -141,8 +142,8 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> 
 
     // Use API token if specified via env var.
     // Prevents 403 errors when IP is throttled by Github API.
-    let gh_token = std::env::var("GITHUB_TOKEN")
-        .ok()
+    let gh_token = env_vars
+        .get("GITHUB_TOKEN")
         .map(|x| x.trim().to_string())
         .filter(|x| !x.is_empty());
 
