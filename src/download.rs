@@ -70,12 +70,18 @@ pub(crate) fn download_sysroot(
 
     let mut headers = HeaderMap::new();
 
-    // Use API token if specified via env var.
+    // Use API token if specified via env var, fallback to std::env::var("GITHUB_TOKEN")
     // Prevents 403 errors when IP is throttled by Github API.
     let gh_token = env_vars
         .get("GITHUB_TOKEN")
         .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty());
+        .filter(|x| !x.is_empty())
+        .or_else(|| {
+            std::env::var("GITHUB_TOKEN")
+                .ok()
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+        });
 
     if let Some(token) = gh_token {
         headers.insert("authorization", format!("Bearer {token}").parse()?);
@@ -140,12 +146,18 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings, env
 
     let mut headers = HeaderMap::new();
 
-    // Use API token if specified via env var.
+    // Use API token if specified via env var, fallback to std::env::var("GITHUB_TOKEN")
     // Prevents 403 errors when IP is throttled by Github API.
     let gh_token = env_vars
         .get("GITHUB_TOKEN")
         .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty());
+        .filter(|x| !x.is_empty())
+        .or_else(|| {
+            std::env::var("GITHUB_TOKEN")
+                .ok()
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+        });
 
     if let Some(token) = gh_token {
         headers.insert("authorization", format!("Bearer {token}").parse()?);

@@ -236,8 +236,10 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
 }
 
 fn gather_user_settings_from(args: &[String], env_vars: &HashMap<String, String>) -> Result<UserSettings> {
-    // Get home directory from HOME env var instead of std::env::home_dir()
-    let home_dir = env_vars.get("HOME").map(PathBuf::from);
+    // Get home directory from HOME env var, fallback to std::env::home_dir()
+    let home_dir = env_vars.get("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::home_dir());
     
     let llvm_location = match try_get_user_setting_value_from("LLVM_LOCATION", args, env_vars)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
