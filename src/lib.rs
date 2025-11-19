@@ -631,4 +631,42 @@ mod tests {
         run_tool_with_passthrough_args("dummytool", vec!["X".into(), "Y".into()], user_settings)
             .unwrap();
     }
+
+    #[test]
+    fn test_library_api_pure_functions() {
+        // Test that the new library API functions work without reading from the environment
+        // This demonstrates that the functions are pure and suitable for library usage
+
+        // Create a custom environment with specific settings
+        let mut env_vars = HashMap::new();
+        env_vars.insert("WASIXCC_SYSROOT".to_string(), "/custom/sysroot".to_string());
+        env_vars.insert("WASIXCC_COMPILER_FLAGS".to_string(), "-O3:-Wall".to_string());
+        env_vars.insert("WASIXCC_WASM_EXCEPTIONS".to_string(), "yes".to_string());
+
+        // Test get_sysroot_with - should use the custom env vars, not process environment
+        let args = vec![];
+        let result = get_sysroot_with(args.clone(), &env_vars);
+        // This will fail because the sysroot doesn't exist, but it proves we're using
+        // the custom env vars (which specify /custom/sysroot) and not the process environment
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("/custom/sysroot"));
+
+        // Test that args override env vars
+        let args_with_override = vec!["-sSYSROOT=/override/sysroot".to_string()];
+        let result = get_sysroot_with(args_with_override, &env_vars);
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("/override/sysroot"));
+
+        // Test get_args_and_user_settings_from to verify it uses custom env vars
+        let args = vec!["-sCOMPILER_POST_FLAGS=-Wextra".to_string()];
+        let (parsed_args, user_settings) = get_args_and_user_settings_from(args, &env_vars).unwrap();
+        
+        assert_eq!(parsed_args, Vec::<String>::new());
+        assert_eq!(user_settings.sysroot_location, Some(PathBuf::from("/custom/sysroot")));
+        assert_eq!(user_settings.extra_compiler_flags, vec!["-O3", "-Wall"]);
+        assert_eq!(user_settings.extra_compiler_post_flags, vec!["-Wextra"]);
+        assert!(user_settings.wasm_exceptions);
+    }
 }
