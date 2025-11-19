@@ -377,8 +377,6 @@ fn link_inputs(state: &State) -> Result<()> {
     let linker_path = state.user_settings.llvm_location.get_tool_path("wasm-ld");
 
     let sysroot_path = state.user_settings.ensure_sysroot_location()?;
-    let sysroot_lib_path = sysroot_path.join("lib");
-    let sysroot_lib_wasm32_path = sysroot_lib_path.join("wasm32-wasi");
 
     let mut command = Command::new(linker_path);
 
@@ -430,14 +428,14 @@ fn link_inputs(state: &State) -> Result<()> {
     // Make sysroots libs available to all modules so they can optionally
     // link against them if needed, even when we don't.
     let mut lib_arg = OsString::new();
-    lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_path);
-    command.arg(lib_arg);
-
-    let mut lib_arg = OsString::new();
-    lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_wasm32_path);
-    command.arg(lib_arg);
+    for path in ["lib", "usr/lib", "usr/local/lib"] {
+        command.arg(format!("-L{}", sysroot_path.join(path).display()));
+        command.arg(format!(
+            "-L{}/wasm32-wasi",
+            sysroot_path.join(path).display()
+        ));
+        lib_arg.clear();
+    }
 
     if module_kind.is_executable() {
         command.args([
@@ -501,6 +499,7 @@ fn link_inputs(state: &State) -> Result<()> {
 
     command.args(&state.args.linker_inputs);
 
+    let sysroot_lib_wasm32_path = sysroot_path.join("lib/wasm32-wasi");
     if module_kind.is_executable() {
         command.arg(sysroot_lib_wasm32_path.join("crt1.o"));
     } else {
