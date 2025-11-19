@@ -223,6 +223,58 @@ WASIXCC_RUN_WASM_OPT=no \
 cmake --build ...
 ```
 
+## Using wasixcc as a Library
+
+`wasixcc` can be used as a Rust library in your own projects. All public functions have pure variants that accept arguments and environment variables as parameters, making them easy to test and use programmatically.
+
+### Example: Compile C code programmatically
+
+```rust
+use wasixcc;
+use std::collections::HashMap;
+
+fn main() -> anyhow::Result<()> {
+    // Create custom environment variables
+    let mut env_vars = HashMap::new();
+    env_vars.insert("WASIXCC_SYSROOT".to_string(), "/path/to/sysroot".to_string());
+    env_vars.insert("WASIXCC_COMPILER_FLAGS".to_string(), "-O3:-Wall".to_string());
+    env_vars.insert("WASIXCC_WASM_EXCEPTIONS".to_string(), "yes".to_string());
+
+    // Create arguments (mimics command-line args)
+    let args = vec![
+        "-sCOMPILER_POST_FLAGS=-Wextra".to_string(),
+        "input.c".to_string(),
+        "-o".to_string(),
+        "output.wasm".to_string(),
+    ];
+
+    // Run the compiler with custom args and env vars
+    // This doesn't read from std::env::args() or std::env::vars()
+    wasixcc::run_compiler_with(args, &env_vars, false)?;
+    
+    Ok(())
+}
+```
+
+### Available Library Functions
+
+All public functions have two variants:
+
+1. **Standard variant** (e.g., `run_compiler`): Reads from process environment (`std::env::args()` and `std::env::vars()`)
+2. **Pure variant** (e.g., `run_compiler_with`): Accepts arguments and environment as parameters
+
+Pure variants:
+- `run_compiler_with(args, env_vars, run_cxx)` - Compile C/C++ code
+- `run_linker_with(args, env_vars)` - Link object files
+- `run_ar_with(args, env_vars)` - Run llvm-ar
+- `run_nm_with(args, env_vars)` - Run llvm-nm
+- `run_ranlib_with(args, env_vars)` - Run llvm-ranlib
+- `get_sysroot_with(args, env_vars)` - Get sysroot path
+- `download_sysroot_with(tag_spec, args, env_vars)` - Download sysroot
+- `download_llvm_with(tag_spec, args, env_vars)` - Download LLVM (Linux only)
+
+The pure variants are recommended for library usage as they're easier to test and don't have hidden dependencies on the process environment.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to open a PR if there's something you feel can be improved.
