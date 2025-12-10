@@ -40,6 +40,7 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-Xlinker",
         "-Xclang",
         "-z",
+        "-iwithsysroot",
     ]
     .into()
 });
