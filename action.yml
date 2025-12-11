@@ -13,17 +13,17 @@ inputs:
     default: 'latest'
   
   sysroot-tag:
-    description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest). Leave empty to skip sysroot installation.'
+    description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest).'
     required: false
     default: 'latest'
   
   llvm-tag:
-    description: 'Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest). Leave empty to skip LLVM installation.'
+    description: 'Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest).'
     required: false
     default: 'latest'
   
   binaryen-tag:
-    description: 'Tag/version of binaryen to install (e.g., version_118, latest). Leave empty to skip binaryen installation.'
+    description: 'Tag/version of binaryen to install (e.g., version_118, latest).'
     required: false
     default: 'latest'
   
@@ -127,13 +127,15 @@ runs:
     - name: Download wasixcc binary
       id: download
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         VERSION="${{ steps.resolve-version.outputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
         DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
         
         echo "Downloading wasixcc from: $DOWNLOAD_URL"
-        curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
         
         if [ ! -f wasixcc.tar.gz ]; then
           echo "Failed to download wasixcc"
@@ -150,24 +152,28 @@ runs:
         tar -xzf wasixcc.tar.gz
         rm wasixcc.tar.gz
         
-        # Create installation directory
-        INSTALL_DIR="$HOME/.wasixcc/bin"
+        # Create installation directory for the main wasixcc binary
+        WASIXCC_HOME="$HOME/.wasixcc"
+        mkdir -p "$WASIXCC_HOME"
+        
+        # Create bin directory for executables installed by --install-executables
+        INSTALL_DIR="$WASIXCC_HOME/bin"
         mkdir -p "$INSTALL_DIR"
         
-        # Move binary to installation directory
+        # Move binary to .wasixcc (not bin) to avoid --install-executables overwriting it
         if [ "${{ steps.platform.outputs.os }}" = "windows" ]; then
-          mv wasixcc.exe "$INSTALL_DIR/"
-          WASIXCC_PATH="$INSTALL_DIR/wasixcc.exe"
+          mv wasixcc.exe "$WASIXCC_HOME/"
+          WASIXCC_PATH="$WASIXCC_HOME/wasixcc.exe"
         else
-          mv wasixcc "$INSTALL_DIR/"
-          chmod +x "$INSTALL_DIR/wasixcc"
-          WASIXCC_PATH="$INSTALL_DIR/wasixcc"
+          mv wasixcc "$WASIXCC_HOME/"
+          chmod +x "$WASIXCC_HOME/wasixcc"
+          WASIXCC_PATH="$WASIXCC_HOME/wasixcc"
         fi
         
-        # Add to PATH
+        # Add bin directory to PATH
         echo "$INSTALL_DIR" >> $GITHUB_PATH
         
-        # Install executables (wasix++, wasixar, etc.)
+        # Install executables (wasix++, wasixar, etc.) to bin directory
         echo "Installing wasixcc executables..."
         "$WASIXCC_PATH" --install-executables "$INSTALL_DIR"
         
@@ -180,14 +186,16 @@ runs:
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         echo "Installing binaryen (wasm-opt)..."
         BINARYEN_TAG="${{ inputs.binaryen-tag }}"
         
         if [ "$BINARYEN_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/bin/wasixcc" --download-binaryen
+          "$HOME/.wasixcc/wasixcc" --download-binaryen
         else
-          "$HOME/.wasixcc/bin/wasixcc" --download-binaryen "$BINARYEN_TAG"
+          "$HOME/.wasixcc/wasixcc" --download-binaryen "$BINARYEN_TAG"
         fi
         
         echo "Installed binaryen successfully"
@@ -195,14 +203,16 @@ runs:
     - name: Install WASIX sysroot
       if: inputs.install-sysroot == 'true'
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         echo "Installing WASIX sysroot..."
         SYSROOT_TAG="${{ inputs.sysroot-tag }}"
         
         if [ "$SYSROOT_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/bin/wasixcc" --download-sysroot
+          "$HOME/.wasixcc/wasixcc" --download-sysroot
         else
-          "$HOME/.wasixcc/bin/wasixcc" --download-sysroot "$SYSROOT_TAG"
+          "$HOME/.wasixcc/wasixcc" --download-sysroot "$SYSROOT_TAG"
         fi
         
         echo "Installed WASIX sysroot successfully"
@@ -210,14 +220,16 @@ runs:
     - name: Install LLVM toolchain
       if: inputs.install-llvm == 'true'
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         echo "Installing LLVM toolchain..."
         LLVM_TAG="${{ inputs.llvm-tag }}"
         
         if [ "$LLVM_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/bin/wasixcc" --download-llvm
+          "$HOME/.wasixcc/wasixcc" --download-llvm
         else
-          "$HOME/.wasixcc/bin/wasixcc" --download-llvm "$LLVM_TAG"
+          "$HOME/.wasixcc/wasixcc" --download-llvm "$LLVM_TAG"
         fi
         
         echo "Installed LLVM toolchain successfully"

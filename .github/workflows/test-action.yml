@@ -95,7 +95,6 @@ jobs:
       - name: Setup wasixcc (minimal - no toolchain)
         uses: ./
         with:
-          version: 'latest'
           install-sysroot: 'false'
           install-llvm: 'false'
           install-binaryen: 'false'
@@ -118,9 +117,6 @@ jobs:
         uses: ./
         with:
           version: 'v0.2.4'
-          install-sysroot: 'true'
-          install-llvm: 'true'
-          install-binaryen: 'true'
           sysroot-tag: 'latest'
           llvm-tag: 'latest'
           binaryen-tag: 'latest'
