@@ -1,0 +1,104 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  formatting:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      
+      - name: Check formatting
+        run: cargo fmt --check
+
+  rust-tests:
+    name: Run Rust Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      
+      - name: Run tests
+        run: cargo test
+
+  download-and-compile:
+    name: Download and Compile Test (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-aarch64
+            os: macos-14
+            container: null
+          - platform: ubuntu-x86_64
+            os: ubuntu-latest
+            container: null
+          - platform: ubuntu-arm64
+            os: ubuntu-24.04-arm
+            container: null
+          - platform: alpine-linux
+            os: ubuntu-latest
+            container: alpine:latest
+    
+    container: ${{ matrix.container }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Alpine dependencies
+        if: matrix.container == 'alpine:latest'
+        run: |
+          apk add --no-cache \
+            curl \
+            gcc \
+            musl-dev \
+            rust \
+            cargo
+      
+      - name: Install Rust (non-Alpine)
+        if: matrix.container != 'alpine:latest'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      
+      - name: Build wasixcc
+        run: cargo build -r -F bin --bin wasixcc
+      
+      - name: Download toolchain and sysroot
+        run: ./target/release/wasixcc --download-all
+      
+      - name: Create test C file
+        run: |
+          cat > test_main.c << 'EOF'
+          #include <stdio.h>
+          
+          int main() {
+              printf("Hello from WASIX!\n");
+              return 0;
+          }
+          EOF
+      
+      - name: Compile test C file
+        run: ./target/release/wasixcc test_main.c -o test_main.wasm
+      
+      - name: Verify output file exists
+        run: |
+          if [ ! -f test_main.wasm ]; then
+            echo "Error: test_main.wasm was not created"
+            exit 1
+          fi
+          echo "Successfully compiled test_main.c to test_main.wasm"
