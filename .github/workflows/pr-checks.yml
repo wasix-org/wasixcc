@@ -36,8 +36,27 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  check-download-changes:
+    name: Check for download-related changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            should_run:
+              - '.github/workflows/pr-checks.yml'
+              - 'Cargo.toml'
+              - 'src/download.rs'
+
   download-and-compile:
     name: Download and Compile Test (${{ matrix.platform }})
+    needs: check-download-changes
+    if: needs.check-download-changes.outputs.should_run == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
