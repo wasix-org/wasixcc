@@ -13,9 +13,9 @@ inputs:
     default: 'latest'
   
   github_token:
-    description: 'GitHub token for API requests and downloads. Defaults to github.token if not provided.'
+    description: 'GitHub token for API requests and downloads. Pass ${{ github.token }} or ${{ secrets.GITHUB_TOKEN }}'
     required: false
-    default: ${{ github.token }}
+    default: ''
   
   sysroot-tag:
     description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest).'
@@ -77,7 +77,7 @@ runs:
           fi
         elif [ "$OS" = "apple" ]; then
           TARGET="${ARCH}-apple-darwin"
-        else
+        elif [ "$OS" = "windows" ]; then
           TARGET="${ARCH}-pc-windows-msvc"
         fi
         
@@ -95,7 +95,11 @@ runs:
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
           echo "Fetching latest release version..."
-          VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -n "$GITHUB_TOKEN" ]; then
+            VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          else
+            VERSION=$(curl -s https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
           if [ -z "$VERSION" ]; then
             echo "Failed to fetch latest version"
             exit 1
@@ -115,7 +119,11 @@ runs:
         DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
         
         echo "Downloading wasixcc from: $DOWNLOAD_URL"
-        curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        if [ -n "$GITHUB_TOKEN" ]; then
+          curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        else
+          curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        fi
         
         if [ ! -f wasixcc.tar.gz ]; then
           echo "Failed to download wasixcc"
