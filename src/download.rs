@@ -28,11 +28,17 @@ pub enum TagSpec {
 }
 
 fn get_llvm_asset_name() -> anyhow::Result<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => Ok("LLVM-Linux-x86_64.tar.gz"),
-        ("linux", "aarch64") => Ok("LLVM-Linux-aarch64.tar.gz"),
-        ("macos", "aarch64") => Ok("LLVM-MacOS-aarch64.tar.gz"),
-        (os, arch) => {
+    match (
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        cfg!(target_env = "musl"),
+    ) {
+        ("linux", "x86_64", true) => Ok("LLVM-Linux-x86_64-musl.tar.gz"),
+        ("linux", "aarch64", true) => Ok("LLVM-Linux-aarch64-musl.tar.gz"),
+        ("linux", "x86_64", false) => Ok("LLVM-Linux-x86_64.tar.gz"),
+        ("linux", "aarch64", false) => Ok("LLVM-Linux-aarch64.tar.gz"),
+        ("macos", "aarch64", _) => Ok("LLVM-MacOS-aarch64.tar.gz"),
+        (os, arch, _) => {
             bail!("LLVM download for {} on {} is not supported", os, arch)
         }
     }
