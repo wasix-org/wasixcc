@@ -14,11 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: 1.90
-          components: rustfmt
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal --component rustfmt
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Check formatting
         run: cargo fmt --check
@@ -29,10 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: 1.90
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Run tests
         run: cargo test
@@ -66,16 +65,11 @@ jobs:
             curl \
             gcc \
             musl-dev
-          
-          # Install rustup and Rust 1.90
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
-      - name: Install Rust (non-Alpine)
-        if: matrix.container != 'alpine:latest'
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: 1.90
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Build wasixcc
         run: cargo build -r --features bin --bin wasixcc
