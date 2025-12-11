@@ -199,8 +199,14 @@ runs:
             BINARYEN_PLATFORM="x86_64-linux"
           else
             echo "No pre-built binaryen binary for Linux $ARCH, attempting to install via package manager..."
-            sudo apt-get update && sudo apt-get install -y binaryen || echo "Warning: Could not install binaryen via apt"
-            exit 0
+            if sudo apt-get update && sudo apt-get install -y binaryen; then
+              echo "Installed binaryen via apt successfully"
+              which wasm-opt && wasm-opt --version
+              exit 0
+            else
+              echo "Warning: Could not install binaryen via apt"
+              exit 1
+            fi
           fi
         elif [ "$OS" = "apple" ]; then
           if [ "$ARCH" = "x86_64" ]; then
@@ -238,16 +244,30 @@ runs:
         
         # Copy binaries
         if [ "$OS" = "windows" ]; then
-          cp "$BINARYEN_DIR/bin/"*.exe "$INSTALL_DIR/" 2>/dev/null || true
+          if cp "$BINARYEN_DIR/bin/"*.exe "$INSTALL_DIR/" 2>/dev/null; then
+            echo "Copied binaryen binaries successfully"
+          else
+            echo "Warning: Failed to copy some binaryen binaries"
+          fi
         else
-          cp "$BINARYEN_DIR/bin/"* "$INSTALL_DIR/" 2>/dev/null || true
-          chmod +x "$INSTALL_DIR/"*
+          if cp "$BINARYEN_DIR/bin/"* "$INSTALL_DIR/" 2>/dev/null; then
+            chmod +x "$INSTALL_DIR/"*
+            echo "Copied binaryen binaries successfully"
+          else
+            echo "Warning: Failed to copy some binaryen binaries"
+          fi
         fi
         
         rm -rf "$BINARYEN_DIR"
         
-        echo "Installed binaryen successfully"
-        "$INSTALL_DIR/wasm-opt" --version || echo "Warning: wasm-opt not found in PATH"
+        # Verify wasm-opt was installed
+        if [ -f "$INSTALL_DIR/wasm-opt" ] || [ -f "$INSTALL_DIR/wasm-opt.exe" ]; then
+          echo "Installed binaryen successfully"
+          "$INSTALL_DIR/wasm-opt" --version
+        else
+          echo "Error: wasm-opt not found after installation"
+          exit 1
+        fi
 
     - name: Install WASIX sysroot
       if: inputs.install-sysroot == 'true'
