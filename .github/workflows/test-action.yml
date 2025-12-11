@@ -1,0 +1,130 @@
+name: Test GitHub Action
+
+on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  workflow_dispatch:
+
+jobs:
+  test-action:
+    name: Test Action on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup wasixcc with all components
+        uses: ./
+        with:
+          version: 'latest'
+          install-sysroot: 'true'
+          install-llvm: 'true'
+          install-binaryen: 'true'
+      
+      - name: Verify wasixcc installation
+        shell: bash
+        run: |
+          echo "Testing wasixcc..."
+          wasixcc --version
+          
+          echo "Testing wasix++..."
+          wasix++ --version || echo "wasix++ not found"
+          
+          echo "Testing wasm-opt..."
+          wasm-opt --version || echo "wasm-opt not found"
+          
+          echo "Checking sysroot..."
+          wasixcc --print-sysroot
+      
+      - name: Create test C program
+        shell: bash
+        run: |
+          cat > hello.c << 'EOF'
+          #include <stdio.h>
+          int main() {
+              printf("Hello from WASIX!\n");
+              return 0;
+          }
+          EOF
+      
+      - name: Compile C program
+        shell: bash
+        run: |
+          wasixcc hello.c -o hello.wasm
+          ls -lh hello.wasm
+      
+      - name: Create test C++ program
+        shell: bash
+        run: |
+          cat > hello.cpp << 'EOF'
+          #include <iostream>
+          int main() {
+              std::cout << "Hello from WASIX C++!" << std::endl;
+              return 0;
+          }
+          EOF
+      
+      - name: Compile C++ program
+        shell: bash
+        run: |
+          wasix++ hello.cpp -o hello_cpp.wasm
+          ls -lh hello_cpp.wasm
+
+  test-action-minimal:
+    name: Test Minimal Action on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup wasixcc (minimal - no toolchain)
+        uses: ./
+        with:
+          version: 'latest'
+          install-sysroot: 'false'
+          install-llvm: 'false'
+          install-binaryen: 'false'
+      
+      - name: Verify wasixcc installation
+        shell: bash
+        run: |
+          echo "Testing wasixcc..."
+          wasixcc --version
+
+  test-action-custom-versions:
+    name: Test Action with Custom Versions
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup wasixcc with specific version
+        uses: ./
+        with:
+          version: 'v0.2.4'
+          install-sysroot: 'true'
+          install-llvm: 'true'
+          install-binaryen: 'true'
+          sysroot-tag: 'latest'
+          llvm-tag: 'latest'
+          binaryen-tag: 'latest'
+      
+      - name: Verify installation
+        shell: bash
+        run: |
+          wasixcc --version
+          wasixcc --print-sysroot
+          wasm-opt --version || echo "wasm-opt not found"
