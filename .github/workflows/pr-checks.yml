@@ -45,6 +45,8 @@ jobs:
         include:
           - platform: macos-aarch64
             os: macos-15
+          - platform: macos-intel
+            os: macos-15-large
           - platform: ubuntu-x86_64
             os: ubuntu-latest
           - platform: ubuntu-arm64
