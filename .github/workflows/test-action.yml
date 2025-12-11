@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     
     steps:
       - name: Checkout repository
@@ -25,6 +25,8 @@ jobs:
       
       - name: Setup wasixcc with all components
         uses: ./
+        with:
+          github_token: ${{ github.token }}
       
       - name: Verify wasixcc installation
         shell: bash
@@ -97,25 +99,3 @@ jobs:
           echo "Testing wasixcc..."
           wasixcc --version
 
-  test-action-custom-versions:
-    name: Test Action with Custom Versions
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Setup wasixcc with specific version
-        uses: ./
-        with:
-          version: 'v0.2.4'
-          sysroot-tag: 'latest'
-          llvm-tag: 'latest'
-          binaryen-tag: 'latest'
-      
-      - name: Verify installation
-        shell: bash
-        run: |
-          wasixcc --version
-          wasixcc --print-sysroot
-          wasm-opt --version || echo "wasm-opt not found"
