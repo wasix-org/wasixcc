@@ -31,6 +31,7 @@ fn get_llvm_asset_name() -> anyhow::Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("LLVM-Linux-x86_64.tar.gz"),
         ("linux", "aarch64") => Ok("LLVM-Linux-aarch64.tar.gz"),
+        ("macos", "x86_64") => Ok("LLVM-MacOS-x86_64.tar.gz"),
         ("macos", "aarch64") => Ok("LLVM-MacOS-aarch64.tar.gz"),
         (os, arch) => {
             bail!("LLVM download for {} on {} is not supported", os, arch)
