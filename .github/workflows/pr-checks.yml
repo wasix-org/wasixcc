@@ -75,6 +75,8 @@ jobs:
         run: cargo build -r --features bin --bin wasixcc
       
       - name: Download toolchain and sysroot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./target/release/wasixcc --download-all
       
       - name: Create test C file
