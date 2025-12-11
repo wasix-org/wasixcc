@@ -12,6 +12,11 @@ inputs:
     required: false
     default: 'latest'
   
+  github_token:
+    description: 'GitHub token for API requests and downloads. Defaults to github.token if not provided.'
+    required: false
+    default: ${{ github.token }}
+  
   sysroot-tag:
     description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest).'
     required: false
@@ -57,39 +62,14 @@ runs:
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
         ARCH=$(uname -m)
         
-        case "$OS" in
-          linux*)
-            OS="linux"
-            ;;
-          darwin*)
-            OS="apple"
-            ;;
-          mingw*|msys*|cygwin*)
-            OS="windows"
-            ;;
-          *)
-            echo "Unsupported OS: $OS"
-            exit 1
-            ;;
-        esac
+        # Normalize OS
+        case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*) OS="windows";; *) echo "Unsupported OS: $OS"; exit 1;; esac
         
-        case "$ARCH" in
-          x86_64|amd64)
-            ARCH="x86_64"
-            ;;
-          aarch64|arm64)
-            ARCH="aarch64"
-            ;;
-          *)
-            echo "Unsupported architecture: $ARCH"
-            exit 1
-            ;;
-        esac
+        # Normalize architecture
+        case "$ARCH" in x86_64|amd64) ARCH="x86_64";; aarch64|arm64) ARCH="aarch64";; *) echo "Unsupported architecture: $ARCH"; exit 1;; esac
         
         # Construct target triple
         if [ "$OS" = "linux" ]; then
-          # Detect if we're on musl or glibc
-          # Check for musl library files or use ldd as fallback
           if [ -f /lib/ld-musl-x86_64.so.1 ] || [ -f /lib/ld-musl-aarch64.so.1 ] || (ldd --version 2>&1 | grep -qi musl); then
             TARGET="${ARCH}-unknown-linux-musl"
           else
@@ -97,7 +77,7 @@ runs:
           fi
         elif [ "$OS" = "apple" ]; then
           TARGET="${ARCH}-apple-darwin"
-        elif [ "$OS" = "windows" ]; then
+        else
           TARGET="${ARCH}-pc-windows-msvc"
         fi
         
@@ -110,7 +90,7 @@ runs:
       id: resolve-version
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
@@ -128,7 +108,7 @@ runs:
       id: download
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         VERSION="${{ steps.resolve-version.outputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
@@ -187,7 +167,7 @@ runs:
       if: inputs.install-binaryen == 'true'
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         echo "Installing binaryen (wasm-opt)..."
         BINARYEN_TAG="${{ inputs.binaryen-tag }}"
@@ -204,7 +184,7 @@ runs:
       if: inputs.install-sysroot == 'true'
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         echo "Installing WASIX sysroot..."
         SYSROOT_TAG="${{ inputs.sysroot-tag }}"
@@ -221,7 +201,7 @@ runs:
       if: inputs.install-llvm == 'true'
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         echo "Installing LLVM toolchain..."
         LLVM_TAG="${{ inputs.llvm-tag }}"

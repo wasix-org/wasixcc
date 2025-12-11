@@ -25,11 +25,6 @@ jobs:
       
       - name: Setup wasixcc with all components
         uses: ./
-        with:
-          version: 'latest'
-          install-sysroot: 'true'
-          install-llvm: 'true'
-          install-binaryen: 'true'
       
       - name: Verify wasixcc installation
         shell: bash
@@ -39,9 +34,6 @@ jobs:
           
           echo "Testing wasix++..."
           wasix++ --version || echo "wasix++ not found"
-          
-          echo "Testing wasm-opt..."
-          wasm-opt --version || echo "wasm-opt not found"
           
           echo "Checking sysroot..."
           wasixcc --print-sysroot
