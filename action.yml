@@ -89,7 +89,8 @@ runs:
         # Construct target triple
         if [ "$OS" = "linux" ]; then
           # Detect if we're on musl or glibc
-          if ldd --version 2>&1 | grep -q musl; then
+          # Check for musl library files or use ldd as fallback
+          if [ -f /lib/ld-musl-x86_64.so.1 ] || [ -f /lib/ld-musl-aarch64.so.1 ] || (ldd --version 2>&1 | grep -qi musl); then
             TARGET="${ARCH}-unknown-linux-musl"
           else
             TARGET="${ARCH}-unknown-linux-gnu"
@@ -108,11 +109,13 @@ runs:
     - name: Resolve wasixcc version
       id: resolve-version
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
           echo "Fetching latest release version..."
-          VERSION=$(curl -s -H "Authorization: token ${{ github.token }}" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
           if [ -z "$VERSION" ]; then
             echo "Failed to fetch latest version"
             exit 1
