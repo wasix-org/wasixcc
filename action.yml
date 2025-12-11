@@ -1,0 +1,303 @@
+name: 'Setup wasixcc'
+description: 'Install wasixcc C/C++ compiler for the WASIX platform with optional toolchain components'
+author: 'wasix-org'
+
+branding:
+  icon: 'code'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'Version of wasixcc to install (e.g., v0.2.4, latest). Defaults to latest release.'
+    required: false
+    default: 'latest'
+  
+  sysroot-tag:
+    description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest). Leave empty to skip sysroot installation.'
+    required: false
+    default: 'latest'
+  
+  llvm-tag:
+    description: 'Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest). Leave empty to skip LLVM installation.'
+    required: false
+    default: 'latest'
+  
+  binaryen-tag:
+    description: 'Tag/version of binaryen to install (e.g., version_118, latest). Leave empty to skip binaryen installation.'
+    required: false
+    default: 'latest'
+  
+  install-sysroot:
+    description: 'Whether to install the WASIX sysroot (true/false)'
+    required: false
+    default: 'true'
+  
+  install-llvm:
+    description: 'Whether to install the LLVM toolchain (true/false)'
+    required: false
+    default: 'true'
+  
+  install-binaryen:
+    description: 'Whether to install binaryen (wasm-opt) (true/false)'
+    required: false
+    default: 'true'
+
+outputs:
+  wasixcc-path:
+    description: 'Path to the wasixcc executable'
+    value: ${{ steps.install-wasixcc.outputs.path }}
+  
+  sysroot-path:
+    description: 'Path to the WASIX sysroot'
+    value: ${{ steps.install-sysroot.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect platform
+      id: platform
+      shell: bash
+      run: |
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        
+        case "$OS" in
+          linux*)
+            OS="linux"
+            ;;
+          darwin*)
+            OS="apple"
+            ;;
+          mingw*|msys*|cygwin*)
+            OS="windows"
+            ;;
+          *)
+            echo "Unsupported OS: $OS"
+            exit 1
+            ;;
+        esac
+        
+        case "$ARCH" in
+          x86_64|amd64)
+            ARCH="x86_64"
+            ;;
+          aarch64|arm64)
+            ARCH="aarch64"
+            ;;
+          *)
+            echo "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+        esac
+        
+        # Construct target triple
+        if [ "$OS" = "linux" ]; then
+          TARGET="${ARCH}-unknown-linux-gnu"
+        elif [ "$OS" = "apple" ]; then
+          TARGET="${ARCH}-apple-darwin"
+        elif [ "$OS" = "windows" ]; then
+          TARGET="${ARCH}-pc-windows-msvc"
+        fi
+        
+        echo "os=$OS" >> $GITHUB_OUTPUT
+        echo "arch=$ARCH" >> $GITHUB_OUTPUT
+        echo "target=$TARGET" >> $GITHUB_OUTPUT
+        echo "Detected platform: $TARGET"
+
+    - name: Resolve wasixcc version
+      id: resolve-version
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          echo "Fetching latest release version..."
+          VERSION=$(curl -s https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "Failed to fetch latest version"
+            exit 1
+          fi
+          echo "Latest version: $VERSION"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Download wasixcc binary
+      id: download
+      shell: bash
+      run: |
+        VERSION="${{ steps.resolve-version.outputs.version }}"
+        TARGET="${{ steps.platform.outputs.target }}"
+        DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
+        
+        echo "Downloading wasixcc from: $DOWNLOAD_URL"
+        curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        
+        if [ ! -f wasixcc.tar.gz ]; then
+          echo "Failed to download wasixcc"
+          exit 1
+        fi
+        
+        echo "Downloaded wasixcc successfully"
+
+    - name: Install wasixcc
+      id: install-wasixcc
+      shell: bash
+      run: |
+        echo "Extracting wasixcc..."
+        tar -xzf wasixcc.tar.gz
+        rm wasixcc.tar.gz
+        
+        # Create installation directory
+        INSTALL_DIR="$HOME/.wasixcc/bin"
+        mkdir -p "$INSTALL_DIR"
+        
+        # Move binary to installation directory
+        if [ "${{ steps.platform.outputs.os }}" = "windows" ]; then
+          mv wasixcc.exe "$INSTALL_DIR/"
+          WASIXCC_PATH="$INSTALL_DIR/wasixcc.exe"
+        else
+          mv wasixcc "$INSTALL_DIR/"
+          chmod +x "$INSTALL_DIR/wasixcc"
+          WASIXCC_PATH="$INSTALL_DIR/wasixcc"
+        fi
+        
+        # Add to PATH
+        echo "$INSTALL_DIR" >> $GITHUB_PATH
+        
+        # Install executables (wasix++, wasixar, etc.)
+        echo "Installing wasixcc executables..."
+        "$WASIXCC_PATH" --install-executables "$INSTALL_DIR"
+        
+        echo "path=$WASIXCC_PATH" >> $GITHUB_OUTPUT
+        echo "Installed wasixcc to: $WASIXCC_PATH"
+        
+        # Verify installation
+        "$WASIXCC_PATH" --version
+
+    - name: Install binaryen
+      if: inputs.install-binaryen == 'true'
+      shell: bash
+      run: |
+        echo "Installing binaryen (wasm-opt)..."
+        
+        OS="${{ steps.platform.outputs.os }}"
+        ARCH="${{ steps.platform.outputs.arch }}"
+        BINARYEN_TAG="${{ inputs.binaryen-tag }}"
+        
+        if [ "$BINARYEN_TAG" = "latest" ]; then
+          echo "Fetching latest binaryen version..."
+          BINARYEN_TAG=$(curl -s https://api.github.com/repos/WebAssembly/binaryen/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$BINARYEN_TAG" ]; then
+            echo "Failed to fetch latest binaryen version"
+            exit 1
+          fi
+          echo "Latest binaryen version: $BINARYEN_TAG"
+        fi
+        
+        # Construct download URL based on platform
+        if [ "$OS" = "linux" ]; then
+          if [ "$ARCH" = "x86_64" ]; then
+            BINARYEN_PLATFORM="x86_64-linux"
+          else
+            echo "No pre-built binaryen binary for Linux $ARCH, attempting to install via package manager..."
+            sudo apt-get update && sudo apt-get install -y binaryen || echo "Warning: Could not install binaryen via apt"
+            exit 0
+          fi
+        elif [ "$OS" = "apple" ]; then
+          if [ "$ARCH" = "x86_64" ]; then
+            BINARYEN_PLATFORM="x86_64-macos"
+          elif [ "$ARCH" = "aarch64" ]; then
+            BINARYEN_PLATFORM="arm64-macos"
+          fi
+        elif [ "$OS" = "windows" ]; then
+          BINARYEN_PLATFORM="x86_64-windows"
+        fi
+        
+        BINARYEN_URL="https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_TAG}/binaryen-${BINARYEN_TAG}-${BINARYEN_PLATFORM}.tar.gz"
+        
+        echo "Downloading binaryen from: $BINARYEN_URL"
+        curl -L -o binaryen.tar.gz "$BINARYEN_URL"
+        
+        if [ ! -f binaryen.tar.gz ]; then
+          echo "Failed to download binaryen"
+          exit 1
+        fi
+        
+        echo "Extracting binaryen..."
+        tar -xzf binaryen.tar.gz
+        rm binaryen.tar.gz
+        
+        # Find the extracted directory and move binaries
+        BINARYEN_DIR=$(find . -maxdepth 1 -type d -name "binaryen-*" | head -n 1)
+        if [ -z "$BINARYEN_DIR" ]; then
+          echo "Failed to find extracted binaryen directory"
+          exit 1
+        fi
+        
+        INSTALL_DIR="$HOME/.wasixcc/bin"
+        mkdir -p "$INSTALL_DIR"
+        
+        # Copy binaries
+        if [ "$OS" = "windows" ]; then
+          cp "$BINARYEN_DIR/bin/"*.exe "$INSTALL_DIR/" 2>/dev/null || true
+        else
+          cp "$BINARYEN_DIR/bin/"* "$INSTALL_DIR/" 2>/dev/null || true
+          chmod +x "$INSTALL_DIR/"*
+        fi
+        
+        rm -rf "$BINARYEN_DIR"
+        
+        echo "Installed binaryen successfully"
+        "$INSTALL_DIR/wasm-opt" --version || echo "Warning: wasm-opt not found in PATH"
+
+    - name: Install WASIX sysroot
+      if: inputs.install-sysroot == 'true'
+      id: install-sysroot
+      shell: bash
+      run: |
+        echo "Installing WASIX sysroot..."
+        SYSROOT_TAG="${{ inputs.sysroot-tag }}"
+        
+        if [ "$SYSROOT_TAG" = "latest" ]; then
+          "$HOME/.wasixcc/bin/wasixcc" --download-sysroot
+        else
+          "$HOME/.wasixcc/bin/wasixcc" --download-sysroot "$SYSROOT_TAG"
+        fi
+        
+        # Get and export sysroot path
+        SYSROOT_PATH=$("$HOME/.wasixcc/bin/wasixcc" --print-sysroot)
+        echo "path=$SYSROOT_PATH" >> $GITHUB_OUTPUT
+        echo "Installed WASIX sysroot to: $SYSROOT_PATH"
+
+    - name: Install LLVM toolchain
+      if: inputs.install-llvm == 'true'
+      shell: bash
+      run: |
+        echo "Installing LLVM toolchain..."
+        LLVM_TAG="${{ inputs.llvm-tag }}"
+        
+        if [ "$LLVM_TAG" = "latest" ]; then
+          "$HOME/.wasixcc/bin/wasixcc" --download-llvm
+        else
+          "$HOME/.wasixcc/bin/wasixcc" --download-llvm "$LLVM_TAG"
+        fi
+        
+        echo "Installed LLVM toolchain successfully"
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        echo "Verifying installation..."
+        echo "wasixcc version:"
+        wasixcc --version
+        
+        if [ "${{ inputs.install-binaryen }}" = "true" ]; then
+          echo "wasm-opt version:"
+          wasm-opt --version || echo "Warning: wasm-opt not found"
+        fi
+        
+        if [ "${{ inputs.install-sysroot }}" = "true" ]; then
+          echo "Sysroot location:"
+          wasixcc --print-sysroot
+        fi
+        
+        echo "Installation complete!"

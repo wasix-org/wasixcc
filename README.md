@@ -17,6 +17,68 @@ flags for the WASIX platform.
 
 ## Installation
 
+### GitHub Actions
+
+The easiest way to use `wasixcc` in your CI/CD pipeline is via the GitHub Action:
+
+```yaml
+- name: Setup wasixcc
+  uses: wasix-org/wasixcc@v0.2.4
+  with:
+    # Optional: specify wasixcc version (default: latest)
+    version: 'v0.2.4'
+    
+    # Optional: install WASIX sysroot (default: true)
+    install-sysroot: 'true'
+    
+    # Optional: install LLVM toolchain (default: true)
+    install-llvm: 'true'
+    
+    # Optional: install binaryen/wasm-opt (default: true)
+    install-binaryen: 'true'
+    
+    # Optional: specify custom tags for components
+    sysroot-tag: 'latest'
+    llvm-tag: 'latest'
+    binaryen-tag: 'latest'
+
+- name: Compile C program
+  run: |
+    wasixcc hello.c -o hello.wasm
+    
+- name: Compile C++ program
+  run: |
+    wasix++ hello.cpp -o hello.wasm
+```
+
+#### Minimal installation
+
+If you only need `wasixcc` without the toolchain components:
+
+```yaml
+- name: Setup wasixcc (minimal)
+  uses: wasix-org/wasixcc@v0.2.4
+  with:
+    install-sysroot: 'false'
+    install-llvm: 'false'
+    install-binaryen: 'false'
+```
+
+#### Custom component versions
+
+You can specify custom tags for individual components:
+
+```yaml
+- name: Setup wasixcc with specific versions
+  uses: wasix-org/wasixcc@v0.2.4
+  with:
+    sysroot-tag: 'v2025-01-01.1'
+    llvm-tag: 'v2025-01-01.1'
+    binaryen-tag: 'version_118'
+```
+
+### Local Installation
+
 1. Install a recent version of [binaryen](https://github.com/WebAssembly/binaryen)
 2. Install `wasixcc`:
    ```bash
