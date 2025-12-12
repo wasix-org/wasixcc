@@ -10,31 +10,76 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            rust_target: x86_64-unknown-linux-musl
+            docker_platform: linux/amd64
+          - arch: aarch64
+            rust_target: aarch64-unknown-linux-musl
+            docker_platform: linux/arm64
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        if: matrix.arch == 'aarch64'
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build static musl binary
+        run: |
+          docker run --platform ${{ matrix.docker_platform }} --rm -v "$PWD":/workspace -w /workspace alpine:latest sh -c '
+            apk add --no-cache rust cargo musl-dev
+            rustup target add ${{ matrix.rust_target }}
+            cargo build --release --target ${{ matrix.rust_target }} -F bin --bin wasixcc
+          '
+      
+      - name: Package binaries for gnu and musl targets
+        shell: bash
+        run: |
+          BINARY_NAME="wasixcc"
+          cd target/${{ matrix.rust_target }}/release
+          
+          # Create package for musl target
+          tar czf ${BINARY_NAME}-${{ matrix.arch }}-unknown-linux-musl.tar.gz ${BINARY_NAME}
+          
+          # Create package for gnu target (same binary, static musl works on both)
+          tar czf ${BINARY_NAME}-${{ matrix.arch }}-unknown-linux-gnu.tar.gz ${BINARY_NAME}
+          
+          mv ${BINARY_NAME}-${{ matrix.arch }}-unknown-linux-musl.tar.gz ../../../
+          mv ${BINARY_NAME}-${{ matrix.arch }}-unknown-linux-gnu.tar.gz ../../../
+      
+      - name: Upload musl artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasixcc-${{ matrix.arch }}-unknown-linux-musl
+          path: wasixcc-${{ matrix.arch }}-unknown-linux-musl.tar.gz
+      
+      - name: Upload gnu artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasixcc-${{ matrix.arch }}-unknown-linux-gnu
+          path: wasixcc-${{ matrix.arch }}-unknown-linux-gnu.tar.gz
+  
+  build-macos:
+    name: Build macOS ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: false
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
           - target: aarch64-apple-darwin
             os: macos-15
-            cross: false
           - target: x86_64-apple-darwin
             os: macos-15-intel
-            cross: false
     
     steps:
       - uses: actions/checkout@v4
@@ -44,21 +89,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       
-      - name: Install cargo-binstall
-        if: matrix.cross
-        uses: cargo-bins/cargo-binstall@main
-      
-      - name: Install cross-compilation tools
-        if: matrix.cross
-        run: |
-          cargo binstall --no-confirm cross
-      
-      - name: Build binary (cross)
-        if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }} -F bin --bin wasixcc
-
-      - name: Build binary (cargo)
-        if: "!matrix.cross"
+      - name: Build binary
         run: cargo build --release --target ${{ matrix.target }} -F bin --bin wasixcc
       
       - name: Package binary
@@ -77,7 +108,7 @@ jobs:
   
   release:
     name: Create Release
-    needs: build
+    needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
