@@ -13,7 +13,7 @@ inputs:
     default: 'latest'
   
   github_token:
-    description: 'GitHub token for API requests and downloads. Pass ${{ github.token }} or ${{ secrets.GITHUB_TOKEN }}'
+    description: 'GitHub token for API requests and downloads. Pass github.token or secrets.GITHUB_TOKEN'
     required: false
     default: ''
   
