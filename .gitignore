@@ -1,3 +1,4 @@
 /.vscode
 /bin
-/targetactionlint
+/target
+actionlint

@@ -38,7 +38,6 @@ jobs:
         run: |
           docker run --platform ${{ matrix.docker_platform }} --rm -v "$PWD":/workspace -w /workspace alpine:latest sh -c '
             apk add --no-cache rust cargo musl-dev
-            rustup target add ${{ matrix.rust_target }}
             cargo build --release --target ${{ matrix.rust_target }} -F bin --bin wasixcc
           '
       
