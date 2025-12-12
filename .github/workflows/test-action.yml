@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     
     steps:
       - name: Checkout repository
@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-15]
     
     steps:
       - name: Checkout repository
@@ -91,3 +91,64 @@ jobs:
           echo "Testing wasixcc..."
           wasixcc --version
 
+
+  test-action-alpine:
+    name: Test Action on Alpine ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    container:
+      image: alpine:3.23
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup wasixcc with all components
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Verify wasixcc installation
+        shell: sh
+        run: |
+          echo "Testing wasixcc..."
+          wasixcc --version
+          
+          echo "Testing wasix++..."
+          wasix++ --version || echo "wasix++ not found"
+          
+          echo "Checking sysroot..."
+          wasixcc --print-sysroot
+      
+      - name: Create and compile C program
+        shell: sh
+        run: |
+          cat > hello.c << 'EOF'
+          #include <stdio.h>
+          int main() {
+              printf("Hello from WASIX!\n");
+              return 0;
+          }
+          EOF
+          wasixcc hello.c -o hello.wasm
+          ls -lh hello.wasm
+      
+      - name: Create and compile C++ program
+        shell: sh
+        run: |
+          cat > hello.cpp << 'EOF'
+          #include <iostream>
+          int main() {
+              std::cout << "Hello from WASIX C++!" << std::endl;
+              return 0;
+          }
+          EOF
+          wasix++ hello.cpp -o hello_cpp.wasm
+          ls -lh hello_cpp.wasm
