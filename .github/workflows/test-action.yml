@@ -35,8 +35,9 @@ jobs:
     container: ${{ matrix.container }}
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Clone repository
+        run: |
+          git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
       
       - name: Setup wasixcc with all components
         uses: ./
@@ -102,8 +103,9 @@ jobs:
     container: ${{ matrix.container }}
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Clone repository
+        run: |
+          git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
       
       - name: Setup wasixcc (minimal - no toolchain)
         uses: ./

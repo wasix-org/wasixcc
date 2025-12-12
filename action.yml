@@ -57,7 +57,7 @@ runs:
   steps:
     - name: Detect platform
       id: platform
-      shell: bash
+      shell: sh
       run: |
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
         ARCH=$(uname -m)
@@ -82,14 +82,14 @@ runs:
           exit 1
         fi
         
-        echo "os=$OS" >> $GITHUB_OUTPUT
-        echo "arch=$ARCH" >> $GITHUB_OUTPUT
-        echo "target=$TARGET" >> $GITHUB_OUTPUT
+        printf "os=%s\n" "$OS" >> $GITHUB_OUTPUT
+        printf "arch=%s\n" "$ARCH" >> $GITHUB_OUTPUT
+        printf "target=%s\n" "$TARGET" >> $GITHUB_OUTPUT
         echo "Detected platform: $TARGET"
 
     - name: Resolve wasixcc version
       id: resolve-version
-      shell: bash
+      shell: sh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
@@ -107,11 +107,11 @@ runs:
           fi
           echo "Latest version: $VERSION"
         fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        printf "version=%s\n" "$VERSION" >> $GITHUB_OUTPUT
 
     - name: Download wasixcc binary
       id: download
-      shell: bash
+      shell: sh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
@@ -135,7 +135,7 @@ runs:
 
     - name: Install wasixcc
       id: install-wasixcc
-      shell: bash
+      shell: sh
       run: |
         echo "Extracting wasixcc..."
         tar -xzf wasixcc.tar.gz
@@ -160,13 +160,13 @@ runs:
         fi
         
         # Add bin directory to PATH
-        echo "$INSTALL_DIR" >> $GITHUB_PATH
+        printf "%s\n" "$INSTALL_DIR" >> $GITHUB_PATH
         
         # Install executables (wasix++, wasixar, etc.) to bin directory
         echo "Installing wasixcc executables..."
         "$WASIXCC_PATH" --install-executables "$INSTALL_DIR"
         
-        echo "path=$WASIXCC_PATH" >> $GITHUB_OUTPUT
+        printf "path=%s\n" "$WASIXCC_PATH" >> $GITHUB_OUTPUT
         echo "Installed wasixcc to: $WASIXCC_PATH"
         
         # Verify installation
@@ -174,7 +174,7 @@ runs:
 
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'
-      shell: bash
+      shell: sh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
@@ -191,7 +191,7 @@ runs:
 
     - name: Install WASIX sysroot
       if: inputs.install-sysroot == 'true'
-      shell: bash
+      shell: sh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
@@ -208,7 +208,7 @@ runs:
 
     - name: Install LLVM toolchain
       if: inputs.install-llvm == 'true'
-      shell: bash
+      shell: sh
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
@@ -224,7 +224,7 @@ runs:
         echo "Installed LLVM toolchain successfully"
 
     - name: Verify installation
-      shell: bash
+      shell: sh
       run: |
         echo "Verifying installation..."
         echo "wasixcc version:"
