@@ -19,7 +19,7 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            cross: false
+            cross: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
@@ -55,7 +55,11 @@ jobs:
       
       - name: Build binary (cross)
         if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }} -F bin --bin wasixcc
+        run: |
+          TARGET=$(echo "${{ matrix.target }}" | sed 's/gnu/musl/g')
+          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target "$TARGET" -F bin --bin wasixcc
+          mv target/$TARGET tmp
+          mv tmp target/${{ matrix.target }}
 
       - name: Build binary (cargo)
         if: "!matrix.cross"
