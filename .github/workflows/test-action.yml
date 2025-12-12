@@ -35,6 +35,10 @@ jobs:
     container: ${{ matrix.container }}
     
     steps:
+      - name: Install git (Alpine only)
+        if: contains(matrix.name, 'alpine')
+        run: apk add --no-cache git
+      
       - name: Clone repository
         run: |
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
@@ -103,6 +107,10 @@ jobs:
     container: ${{ matrix.container }}
     
     steps:
+      - name: Install git (Alpine only)
+        if: contains(matrix.name, 'alpine')
+        run: apk add --no-cache git
+      
       - name: Clone repository
         run: |
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
@@ -110,6 +118,7 @@ jobs:
       - name: Setup wasixcc (minimal - no toolchain)
         uses: ./
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           install-sysroot: 'false'
           install-llvm: 'false'
           install-binaryen: 'false'
