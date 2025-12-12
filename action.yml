@@ -1,10 +1,10 @@
 name: 'Setup wasixcc'
-description: 'Install wasixcc C/C++ compiler for the WASIX platform with optional toolchain components'
+description: 'Setup the wasixcc C/C++ compiler'
 author: 'wasix-org'
 
 branding:
-  icon: 'code'
-  color: 'blue'
+  icon: 'box'
+  color: 'purple'
 
 inputs:
   version:
@@ -13,7 +13,7 @@ inputs:
     default: 'latest'
   
   github_token:
-    description: 'GitHub token for API requests and downloads. Pass github.token or secrets.GITHUB_TOKEN'
+    description: 'GitHub token for API requests and downloads. Pass secrets.GITHUB_TOKEN'
     required: false
     default: ''
   
@@ -65,12 +65,9 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Ensure required tools are available
+    - name: Ensure sed and curl are available
       shell: sh
       run: |
-        echo "Checking for required tools (curl, sed)..."
-        
-        # Check if curl is available
         if ! command -v curl >/dev/null 2>&1; then
           echo "curl not found, attempting to install..."
           if command -v apk >/dev/null 2>&1; then
@@ -87,7 +84,6 @@ runs:
           fi
         fi
         
-        # Check if sed is available
         if ! command -v sed >/dev/null 2>&1; then
           echo "sed not found, attempting to install..."
           if command -v apk >/dev/null 2>&1; then
@@ -103,8 +99,6 @@ runs:
             exit 1
           fi
         fi
-        
-        echo "Required tools are available"
     
     - name: Detect platform
       id: platform
@@ -146,7 +140,6 @@ runs:
       run: |
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
-          echo "Fetching latest release version..."
           if [ -n "$GITHUB_TOKEN" ]; then
             VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
           else
@@ -156,9 +149,8 @@ runs:
             echo "Failed to fetch latest version"
             exit 1
           fi
-          echo "Latest version: $VERSION"
         fi
-        printf "version=%s\n" "$VERSION" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Download wasixcc binary
       id: download
@@ -170,7 +162,6 @@ runs:
         TARGET="${{ steps.platform.outputs.target }}"
         DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
         
-        echo "Downloading wasixcc from: $DOWNLOAD_URL"
         if [ -n "$GITHUB_TOKEN" ]; then
           curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
         else
@@ -181,47 +172,28 @@ runs:
           echo "Failed to download wasixcc"
           exit 1
         fi
-        
-        echo "Downloaded wasixcc successfully"
 
     - name: Install wasixcc
       id: install-wasixcc
       shell: sh
       run: |
-        echo "Extracting wasixcc..."
         tar -xzf wasixcc.tar.gz
         rm wasixcc.tar.gz
         
-        # Create installation directory for the main wasixcc binary
         WASIXCC_HOME="$HOME/.wasixcc"
+        chmod +x "wasixcc"
         mkdir -p "$WASIXCC_HOME"
-        
-        # Create bin directory for executables installed by --install-executables
-        INSTALL_DIR="$WASIXCC_HOME/bin"
-        mkdir -p "$INSTALL_DIR"
-        
-        # Move binary to .wasixcc (not bin) to avoid --install-executables overwriting it
-        if [ "${{ steps.platform.outputs.os }}" = "windows" ]; then
-          mv wasixcc.exe "$WASIXCC_HOME/"
-          WASIXCC_PATH="$WASIXCC_HOME/wasixcc.exe"
-        else
-          mv wasixcc "$WASIXCC_HOME/"
-          chmod +x "$WASIXCC_HOME/wasixcc"
-          WASIXCC_PATH="$WASIXCC_HOME/wasixcc"
-        fi
-        
-        # Add bin directory to PATH
-        printf "%s\n" "$INSTALL_DIR" >> $GITHUB_PATH
+        mv wasixcc "$WASIXCC_HOME/"
+        echo "path=$WASIXCC_HOME/wasixcc" >> $GITHUB_OUTPUT
         
         # Install executables (wasix++, wasixar, etc.) to bin directory
-        echo "Installing wasixcc executables..."
-        "$WASIXCC_PATH" --install-executables "$INSTALL_DIR"
+        mkdir -p "$WASIXCC_HOME/bin"
+        "$WASIXCC_HOME/wasixcc" --install-executables "$WASIXCC_HOME/bin"
+        echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
         
-        printf "path=%s\n" "$WASIXCC_PATH" >> $GITHUB_OUTPUT
-        echo "Installed wasixcc to: $WASIXCC_PATH"
         
         # Verify installation
-        "$WASIXCC_PATH" --version
+        wasixcc --version
 
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'
@@ -229,18 +201,12 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "Installing binaryen (wasm-opt)..."
-        BINARYEN_TAG="${{ inputs.binaryen-tag }}"
-        
-        if [ "$BINARYEN_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/wasixcc" --download-binaryen
+        if [ "${{ inputs.binaryen-tag }}" = "latest" ]; then
+          wasixcc --download-binaryen
         else
-          "$HOME/.wasixcc/wasixcc" --download-binaryen "$BINARYEN_TAG"
+          wasixcc --download-binaryen "${{ inputs.binaryen-tag }}"
         fi
         
-        echo "Installed binaryen successfully"
-        
-        # Add binaryen to PATH if requested
         if [ "${{ inputs.add-binaryen-path }}" = "true" ]; then
           BINARYEN_BIN="$HOME/.wasixcc/binaryen/bin"
           if [ -d "$BINARYEN_BIN" ]; then
@@ -258,16 +224,11 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "Installing WASIX sysroot..."
-        SYSROOT_TAG="${{ inputs.sysroot-tag }}"
-        
-        if [ "$SYSROOT_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/wasixcc" --download-sysroot
+        if [ "${{ inputs.sysroot-tag }}" = "latest" ]; then
+          wasixcc --download-sysroot
         else
-          "$HOME/.wasixcc/wasixcc" --download-sysroot "$SYSROOT_TAG"
+          wasixcc --download-sysroot "${{ inputs.sysroot-tag }}"
         fi
-        
-        echo "Installed WASIX sysroot successfully"
 
     - name: Install LLVM toolchain
       if: inputs.install-llvm == 'true'
@@ -275,18 +236,12 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        echo "Installing LLVM toolchain..."
-        LLVM_TAG="${{ inputs.llvm-tag }}"
-        
-        if [ "$LLVM_TAG" = "latest" ]; then
-          "$HOME/.wasixcc/wasixcc" --download-llvm
+        if [ "${{ inputs.llvm-tag }}" = "latest" ]; then
+          wasixcc --download-llvm
         else
-          "$HOME/.wasixcc/wasixcc" --download-llvm "$LLVM_TAG"
+          wasixcc --download-llvm "${{ inputs.llvm-tag }}"
         fi
         
-        echo "Installed LLVM toolchain successfully"
-        
-        # Add LLVM to PATH if requested
         if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
           LLVM_BIN="$HOME/.wasixcc/llvm/bin"
           if [ -d "$LLVM_BIN" ]; then
@@ -297,12 +252,3 @@ runs:
             exit 1
           fi
         fi
-
-    - name: Verify installation
-      shell: sh
-      run: |
-        echo "Verifying installation..."
-        echo "wasixcc version:"
-        wasixcc --version
-        
-        echo "Installation complete!"
