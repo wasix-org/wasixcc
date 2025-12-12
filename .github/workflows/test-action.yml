@@ -12,12 +12,33 @@ permissions:
 
 jobs:
   test-action:
-    name: Test Action on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test Action on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+            shell: bash
+          - name: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm
+            shell: bash
+          - name: macos-15
+            runner: macos-15
+            shell: bash
+          - name: macos-15-intel
+            runner: macos-15-intel
+            shell: bash
+          - name: alpine-3.23-x86_64
+            runner: ubuntu-24.04
+            container: alpine:3.23
+            shell: sh
+          - name: alpine-3.23-aarch64
+            runner: ubuntu-24.04-arm
+            container: alpine:3.23
+            shell: sh
+    container: ${{ matrix.container }}
     
     steps:
       - name: Checkout repository
@@ -29,7 +50,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Verify wasixcc installation
-        shell: bash
+        shell: ${{ matrix.shell }}
         run: |
           echo "Testing wasixcc..."
           wasixcc --version
@@ -41,7 +62,7 @@ jobs:
           wasixcc --print-sysroot
       
       - name: Create and compile C program
-        shell: bash
+        shell: ${{ matrix.shell }}
         run: |
           cat > hello.c << 'EOF'
           #include <stdio.h>
@@ -54,7 +75,7 @@ jobs:
           ls -lh hello.wasm
       
       - name: Create and compile C++ program
-        shell: bash
+        shell: ${{ matrix.shell }}
         run: |
           cat > hello.cpp << 'EOF'
           #include <iostream>
@@ -91,64 +112,3 @@ jobs:
           echo "Testing wasixcc..."
           wasixcc --version
 
-
-  test-action-alpine:
-    name: Test Action on Alpine ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: x86_64
-          - runner: ubuntu-24.04-arm
-            arch: aarch64
-    container:
-      image: alpine:3.23
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Setup wasixcc with all components
-        uses: ./
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Verify wasixcc installation
-        shell: sh
-        run: |
-          echo "Testing wasixcc..."
-          wasixcc --version
-          
-          echo "Testing wasix++..."
-          wasix++ --version || echo "wasix++ not found"
-          
-          echo "Checking sysroot..."
-          wasixcc --print-sysroot
-      
-      - name: Create and compile C program
-        shell: sh
-        run: |
-          cat > hello.c << 'EOF'
-          #include <stdio.h>
-          int main() {
-              printf("Hello from WASIX!\n");
-              return 0;
-          }
-          EOF
-          wasixcc hello.c -o hello.wasm
-          ls -lh hello.wasm
-      
-      - name: Create and compile C++ program
-        shell: sh
-        run: |
-          cat > hello.cpp << 'EOF'
-          #include <iostream>
-          int main() {
-              std::cout << "Hello from WASIX C++!" << std::endl;
-              return 0;
-          }
-          EOF
-          wasix++ hello.cpp -o hello_cpp.wasm
-          ls -lh hello_cpp.wasm
