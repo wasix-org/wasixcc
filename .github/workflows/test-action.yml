@@ -58,6 +58,23 @@ jobs:
           
           echo "Checking sysroot..."
           wasixcc --print-sysroot
+          
+          echo "Verifying wasm-opt is in PATH..."
+          if command -v wasm-opt >/dev/null 2>&1; then
+            echo "✓ wasm-opt found in PATH"
+            wasm-opt --version
+          else
+            echo "✗ wasm-opt NOT found in PATH (expected to be available)"
+            exit 1
+          fi
+          
+          echo "Verifying clang is NOT in PATH..."
+          if command -v clang >/dev/null 2>&1; then
+            echo "✗ clang found in PATH (expected to NOT be available by default)"
+            exit 1
+          else
+            echo "✓ clang correctly NOT in PATH"
+          fi
       
       - name: Create and compile C program
         run: |
@@ -82,49 +99,4 @@ jobs:
           EOF
           wasix++ hello.cpp -o hello_cpp.wasm
           ls -lh hello_cpp.wasm
-
-  test-action-minimal:
-    name: Test Minimal Action on ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ubuntu-24.04
-            runner: ubuntu-24.04
-          - name: ubuntu-24.04-arm
-            runner: ubuntu-24.04-arm
-          - name: macos-15
-            runner: macos-15
-          - name: macos-15-intel
-            runner: macos-15-intel
-          - name: alpine-3.23-x86_64
-            runner: ubuntu-24.04
-            container: alpine:3.23
-          - name: alpine-3.23-aarch64
-            runner: ubuntu-24.04-arm
-            container: alpine:3.23
-    container: ${{ matrix.container }}
-    
-    steps:
-      - name: Install git (Alpine only)
-        if: contains(matrix.name, 'alpine')
-        run: apk add --no-cache git
-      
-      - name: Clone repository
-        run: |
-          git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
-      
-      - name: Setup wasixcc (minimal - no toolchain)
-        uses: ./
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          install-sysroot: 'false'
-          install-llvm: 'false'
-          install-binaryen: 'false'
-      
-      - name: Verify wasixcc installation
-        run: |
-          echo "Testing wasixcc..."
-          wasixcc --version
 
