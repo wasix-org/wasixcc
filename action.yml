@@ -239,18 +239,17 @@ runs:
         fi
         
         echo "Installed binaryen successfully"
-    
-    - name: Add binaryen to PATH
-      if: inputs.install-binaryen == 'true' && inputs.add-binaryen-path == 'true'
-      shell: sh
-      run: |
-        # Find binaryen installation directory
-        BINARYEN_DIR=$(find "$HOME/.wasixcc" -type d -name "binaryen-*" | head -n 1)
-        if [ -n "$BINARYEN_DIR" ] && [ -d "$BINARYEN_DIR/bin" ]; then
-          printf "%s\n" "$BINARYEN_DIR/bin" >> $GITHUB_PATH
-          echo "Added binaryen to PATH: $BINARYEN_DIR/bin"
-        else
-          echo "Warning: Could not find binaryen installation directory"
+        
+        # Add binaryen to PATH if requested
+        if [ "${{ inputs.add-binaryen-path }}" = "true" ]; then
+          BINARYEN_BIN="$HOME/.wasixcc/binaryen/bin"
+          if [ -d "$BINARYEN_BIN" ]; then
+            printf "%s\n" "$BINARYEN_BIN" >> $GITHUB_PATH
+            echo "Added binaryen to PATH: $BINARYEN_BIN"
+          else
+            echo "Error: Could not find binaryen installation directory at $BINARYEN_BIN"
+            exit 1
+          fi
         fi
 
     - name: Install WASIX sysroot
@@ -286,18 +285,17 @@ runs:
         fi
         
         echo "Installed LLVM toolchain successfully"
-    
-    - name: Add LLVM toolchain to PATH
-      if: inputs.install-llvm == 'true' && inputs.add-llvm-path == 'true'
-      shell: sh
-      run: |
-        # Find LLVM installation directory
-        LLVM_DIR=$(find "$HOME/.wasixcc" -type d -name "llvm-*" | head -n 1)
-        if [ -n "$LLVM_DIR" ] && [ -d "$LLVM_DIR/bin" ]; then
-          printf "%s\n" "$LLVM_DIR/bin" >> $GITHUB_PATH
-          echo "Added LLVM toolchain to PATH: $LLVM_DIR/bin"
-        else
-          echo "Warning: Could not find LLVM installation directory"
+        
+        # Add LLVM to PATH if requested
+        if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
+          LLVM_BIN="$HOME/.wasixcc/llvm/bin"
+          if [ -d "$LLVM_BIN" ]; then
+            printf "%s\n" "$LLVM_BIN" >> $GITHUB_PATH
+            echo "Added LLVM toolchain to PATH: $LLVM_BIN"
+          else
+            echo "Error: Could not find LLVM installation directory at $LLVM_BIN"
+            exit 1
+          fi
         fi
 
     - name: Verify installation
