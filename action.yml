@@ -190,10 +190,6 @@ runs:
         mkdir -p "$WASIXCC_HOME/bin"
         "$WASIXCC_HOME/wasixcc" --install-executables "$WASIXCC_HOME/bin"
         echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
-        
-        
-        # Verify installation
-        wasixcc --version
 
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'
@@ -252,3 +248,9 @@ runs:
             exit 1
           fi
         fi
+
+    - name: Verify installation
+      shell: sh
+      run: |
+        echo "wasixcc version:"
+        wasixcc --version
