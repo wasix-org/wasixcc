@@ -26,7 +26,7 @@ jobs:
       - name: Setup wasixcc with all components
         uses: ./
         with:
-          github_token: ${{ github.token }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Verify wasixcc installation
         shell: bash
@@ -40,7 +40,7 @@ jobs:
           echo "Checking sysroot..."
           wasixcc --print-sysroot
       
-      - name: Create test C program
+      - name: Create and compile C program
         shell: bash
         run: |
           cat > hello.c << 'EOF'
@@ -50,14 +50,10 @@ jobs:
               return 0;
           }
           EOF
-      
-      - name: Compile C program
-        shell: bash
-        run: |
           wasixcc hello.c -o hello.wasm
           ls -lh hello.wasm
       
-      - name: Create test C++ program
+      - name: Create and compile C++ program
         shell: bash
         run: |
           cat > hello.cpp << 'EOF'
@@ -67,10 +63,6 @@ jobs:
               return 0;
           }
           EOF
-      
-      - name: Compile C++ program
-        shell: bash
-        run: |
           wasix++ hello.cpp -o hello_cpp.wasm
           ls -lh hello_cpp.wasm
 
