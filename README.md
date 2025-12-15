@@ -17,40 +17,61 @@ flags for the WASIX platform.
 
 ## Installation
 
+```sh
+curl -fsSL https://wasix.cc | sh
+```
+
+The installer will install wasixcc and it's dependencies to `~/.wasixcc`
+
+<details>
+  <summary>Other installation options</summary>
+  
+  _If you dont use the installer (or the github action)_
+
+- From [crates.io](https://crates.io/crates/wasixcc") (macOS, Linux)
+
+  ```sh
+  cargo install wasixcc
+  # Install executables
+  sudo wasixcc --install-executables /usr/local/bin
+  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixcc --download-all
+  ```
+
+- [Cargo binstall](https://crates.io/crates/cargo-binstall)</a>
+
+  ```sh
+  cargo binstall wasixcc
+  # Install executables
+  sudo wasixcc --install-executables /usr/local/bin
+  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixcc --download-all
+  ```
+
+- Directly from the [git repo](https://github.com/wasix-org/wasixcc)
+
+  ```sh
+  git clone https://github.com/wasix-org/wasixcc
+  cd wasixcc
+  cargo build -r -F bin --bin wasixcc
+  # Install executables
+  sudo wasixcc --install-executables /usr/local/bin
+  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixcc --download-all
+  ```
+
+</details>
+
 ### GitHub Actions
 
-The easiest way to use `wasixcc` in your CI/CD pipeline is via the GitHub Action:
+To use `wasixcc` in your GitHub Action use the following snippet
 
 ```yaml
 - name: Install wasixcc
   uses: wasix-org/wasixcc@main
 ```
 
-### Local Installation
-
-1. Install a recent version of [binaryen](https://github.com/WebAssembly/binaryen)
-2. Install `wasixcc`:
-   ```bash
-   cargo install wasixcc -F bin
-   ```
-   - Alternatively, if you have [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), you can install pre-built binaries:
-     ```bash
-     cargo binstall wasixcc
-     ```
-   - Or clone and build wasixcc from this repo:
-     ```bash
-     git clone https://github.com/wasix-org/wasixcc
-     cd wasixcc
-     cargo build -r -F bin --bin wasixcc
-     ```
-3. Install all executables (`wasix++`, `wasixar`, etc.) to your PATH:
-   ```bash
-   sudo wasixcc --install-executables /usr/local/bin
-   ```
-4. Optionally, download the latest LLVM toolchain and WASIX sysroot if you don't have them already:
-   ```bash
-   wasixcc --download-all
-   ```
+This will setup wasixcc and all dependencies in less than 10 seconds.
 
 ## Usage
 
