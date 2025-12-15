@@ -1,0 +1,120 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  formatting:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal --component rustfmt
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Check formatting
+        run: cargo fmt --check
+
+  rust-tests:
+    name: Run Rust Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Run tests
+        run: cargo test
+
+  check-toolchain-changes:
+    name: Check if toolchain tests should run
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            should_run:
+              - '.github/workflows/pr-checks.yml'
+              - 'Cargo.toml'
+              - 'src/download.rs'
+
+  toolchain-test:
+    name: Toolchain Test (${{ matrix.platform }})
+    needs: check-toolchain-changes
+    if: needs.check-toolchain-changes.outputs.should_run == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-aarch64
+            os: macos-15
+          - platform: macos-x86_64
+            os: macos-15-intel
+          - platform: ubuntu-x86_64
+            os: ubuntu-latest
+          - platform: ubuntu-arm64
+            os: ubuntu-24.04-arm
+          - platform: alpine-linux
+            os: ubuntu-latest
+            container: alpine:latest
+    
+    container: ${{ matrix.container }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Alpine dependencies
+        if: matrix.container == 'alpine:latest'
+        run: |
+          apk add --no-cache \
+            curl \
+            gcc \
+            musl-dev
+      
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Build wasixcc
+        run: cargo build -r --features bin --bin wasixcc
+      
+      - name: Download toolchain and sysroot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./target/release/wasixcc --download-all
+      
+      - name: Test compilation
+        run: |
+          cat > test_main.c << 'EOF'
+          #include <stdio.h>
+          
+          int main() {
+              printf("Hello from WASIX!\n");
+              return 0;
+          }
+          EOF
+          
+          ./target/release/wasixcc test_main.c -o test_main.wasm
+          
+          if [ ! -f test_main.wasm ]; then
+            echo "Error: test_main.wasm was not created"
+            exit 1
+          fi
+          echo "Successfully compiled test_main.c to test_main.wasm"
