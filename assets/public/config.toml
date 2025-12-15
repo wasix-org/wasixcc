@@ -1,0 +1,7 @@
+[general]
+root = "/public"
+
+[advanced]
+[[advanced.rewrites]]
+source = "/"
+destination = "/install.sh"
