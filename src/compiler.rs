@@ -20,6 +20,7 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-iwithprefix",
         "-iwithprefixbefore",
         "-isysroot",
+        "-iwithsysroot",
         "-imultilib",
         "-A",
         "-isystem",
