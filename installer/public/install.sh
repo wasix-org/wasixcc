@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -xe
+set -e
 
 WASIXCC_DIR="$HOME/.wasixcc"
 WASIXCC_BIN="$WASIXCC_DIR/bin"
