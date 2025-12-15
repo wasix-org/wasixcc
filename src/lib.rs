@@ -246,17 +246,11 @@ pub fn download_sysroot(tag_spec: TagSpec) -> Result<()> {
     download::download_sysroot(tag_spec, &user_settings)
 }
 
-#[cfg(target_os = "linux")]
 pub fn download_llvm(tag_spec: TagSpec) -> Result<()> {
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
 
     let (_, user_settings) = get_args_and_user_settings()?;
     download::download_llvm(tag_spec, &user_settings)
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn download_llvm(_tag_spec: TagSpec) -> Result<()> {
-    bail!("LLVM download is only supported on Linux");
 }
 
 pub fn download_binaryen(tag_spec: TagSpec) -> Result<()> {

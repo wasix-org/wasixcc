@@ -17,12 +17,27 @@ flags for the WASIX platform.
 
 ## Installation
 
+### GitHub Actions
+
+The easiest way to use `wasixcc` in your CI/CD pipeline is via the GitHub Action:
+
+```yaml
+- name: Install wasixcc
+  uses: wasix-org/wasixcc@main
+```
+
+### Local Installation
+
 1. Install a recent version of [binaryen](https://github.com/WebAssembly/binaryen)
 2. Install `wasixcc`:
    ```bash
    cargo install wasixcc -F bin
    ```
-   - Alternatively, clone and build wasixcc from this repo:
+   - Alternatively, if you have [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), you can install pre-built binaries:
+     ```bash
+     cargo binstall wasixcc
+     ```
+   - Or clone and build wasixcc from this repo:
      ```bash
      git clone https://github.com/wasix-org/wasixcc
      cd wasixcc

@@ -6,6 +6,11 @@ license = "MIT"
 repository = "https://github.com/wasix-org/wasixcc"
 description = "C/C++ compiler for the WASIX platform"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
 [[bin]]
 name = "wasixcc"
 required-features = ["tracing-subscriber"]

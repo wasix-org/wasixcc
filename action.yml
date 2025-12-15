@@ -1,0 +1,256 @@
+name: 'Setup wasixcc'
+description: 'Setup the wasixcc C/C++ compiler'
+author: 'wasix-org'
+
+branding:
+  icon: 'box'
+  color: 'purple'
+
+inputs:
+  version:
+    description: 'Version of wasixcc to install (e.g., v0.2.4, latest). Defaults to latest release.'
+    required: false
+    default: 'latest'
+  
+  github_token:
+    description: 'GitHub token for API requests and downloads. Pass secrets.GITHUB_TOKEN'
+    required: false
+    default: ''
+  
+  sysroot-tag:
+    description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest).'
+    required: false
+    default: 'latest'
+  
+  llvm-tag:
+    description: 'Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest).'
+    required: false
+    default: 'latest'
+  
+  binaryen-tag:
+    description: 'Tag/version of binaryen to install (e.g., version_118, latest).'
+    required: false
+    default: 'latest'
+  
+  install-sysroot:
+    description: 'Whether to install the WASIX sysroot (true/false)'
+    required: false
+    default: 'true'
+  
+  install-llvm:
+    description: 'Whether to install the LLVM toolchain (true/false)'
+    required: false
+    default: 'true'
+  
+  install-binaryen:
+    description: 'Whether to install binaryen (wasm-opt) (true/false)'
+    required: false
+    default: 'true'
+  
+  add-binaryen-path:
+    description: 'Whether to add binaryen (wasm-opt) to PATH (true/false)'
+    required: false
+    default: 'true'
+  
+  add-llvm-path:
+    description: 'Whether to add LLVM toolchain (clang, llvm-ar, etc.) to PATH (true/false)'
+    required: false
+    default: 'false'
+
+outputs:
+  wasixcc-path:
+    description: 'Path to the wasixcc executable'
+    value: ${{ steps.install-wasixcc.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Ensure sed and curl are available
+      shell: sh
+      run: |
+        if ! command -v curl >/dev/null 2>&1; then
+          echo "curl not found, attempting to install..."
+          if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache curl
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y curl
+          elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm curl
+          elif command -v brew >/dev/null 2>&1; then
+            brew install curl
+          else
+            echo "Error: curl is not installed and no supported package manager found"
+            exit 1
+          fi
+        fi
+        
+        if ! command -v sed >/dev/null 2>&1; then
+          echo "sed not found, attempting to install..."
+          if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache sed
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y sed
+          elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm sed
+          elif command -v brew >/dev/null 2>&1; then
+            brew install gnu-sed
+          else
+            echo "Error: sed is not installed and no supported package manager found"
+            exit 1
+          fi
+        fi
+    
+    - name: Detect platform
+      id: platform
+      shell: sh
+      run: |
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        
+        # Normalize OS
+        case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*|windows*) OS="windows";; *) echo "Unsupported OS: $OS"; exit 1;; esac
+        
+        # Normalize architecture
+        case "$ARCH" in x86_64|amd64) ARCH="x86_64";; aarch64|arm64) ARCH="aarch64";; *) echo "Unsupported architecture: $ARCH"; exit 1;; esac
+        
+        # Construct target triple
+        if [ "$OS" = "linux" ]; then
+          if [ -f /lib/ld-musl-x86_64.so.1 ] || [ -f /lib/ld-musl-aarch64.so.1 ] || (ldd --version 2>&1 | grep -qi musl); then
+            TARGET="${ARCH}-unknown-linux-musl"
+          else
+            TARGET="${ARCH}-unknown-linux-gnu"
+          fi
+        elif [ "$OS" = "apple" ]; then
+          TARGET="${ARCH}-apple-darwin"
+        elif [ "$OS" = "windows" ]; then
+          echo "Warning: Windows builds are not yet available. Please use WSL or a Linux/macOS environment."
+          exit 1
+        fi
+        
+        printf "os=%s\n" "$OS" >> $GITHUB_OUTPUT
+        printf "arch=%s\n" "$ARCH" >> $GITHUB_OUTPUT
+        printf "target=%s\n" "$TARGET" >> $GITHUB_OUTPUT
+        echo "Detected platform: $TARGET"
+
+    - name: Resolve wasixcc version
+      id: resolve-version
+      shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        VERSION="${{ inputs.version }}"
+        if [ "$VERSION" = "latest" ]; then
+          if [ -n "$GITHUB_TOKEN" ]; then
+            VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          else
+            VERSION=$(curl -s https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "Failed to fetch latest version"
+            exit 1
+          fi
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Download wasixcc binary
+      id: download
+      shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        VERSION="${{ steps.resolve-version.outputs.version }}"
+        TARGET="${{ steps.platform.outputs.target }}"
+        DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
+        
+        if [ -n "$GITHUB_TOKEN" ]; then
+          curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        else
+          curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
+        fi
+        
+        if [ ! -f wasixcc.tar.gz ]; then
+          echo "Failed to download wasixcc"
+          exit 1
+        fi
+
+    - name: Install wasixcc
+      id: install-wasixcc
+      shell: sh
+      run: |
+        tar -xzf wasixcc.tar.gz
+        rm wasixcc.tar.gz
+        
+        WASIXCC_HOME="$HOME/.wasixcc"
+        chmod +x "wasixcc"
+        mkdir -p "$WASIXCC_HOME"
+        mv wasixcc "$WASIXCC_HOME/"
+        echo "path=$WASIXCC_HOME/wasixcc" >> $GITHUB_OUTPUT
+        
+        # Install executables (wasix++, wasixar, etc.) to bin directory
+        mkdir -p "$WASIXCC_HOME/bin"
+        "$WASIXCC_HOME/wasixcc" --install-executables "$WASIXCC_HOME/bin"
+        echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
+
+    - name: Install binaryen
+      if: inputs.install-binaryen == 'true'
+      shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        if [ "${{ inputs.binaryen-tag }}" = "latest" ]; then
+          wasixcc --download-binaryen
+        else
+          wasixcc --download-binaryen "${{ inputs.binaryen-tag }}"
+        fi
+        
+        if [ "${{ inputs.add-binaryen-path }}" = "true" ]; then
+          BINARYEN_BIN="$HOME/.wasixcc/binaryen/bin"
+          if [ -d "$BINARYEN_BIN" ]; then
+            printf "%s\n" "$BINARYEN_BIN" >> $GITHUB_PATH
+            echo "Added binaryen to PATH: $BINARYEN_BIN"
+          else
+            echo "Error: Could not find binaryen installation directory at $BINARYEN_BIN"
+            exit 1
+          fi
+        fi
+
+    - name: Install WASIX sysroot
+      if: inputs.install-sysroot == 'true'
+      shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        if [ "${{ inputs.sysroot-tag }}" = "latest" ]; then
+          wasixcc --download-sysroot
+        else
+          wasixcc --download-sysroot "${{ inputs.sysroot-tag }}"
+        fi
+
+    - name: Install LLVM toolchain
+      if: inputs.install-llvm == 'true'
+      shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        if [ "${{ inputs.llvm-tag }}" = "latest" ]; then
+          wasixcc --download-llvm
+        else
+          wasixcc --download-llvm "${{ inputs.llvm-tag }}"
+        fi
+        
+        if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
+          LLVM_BIN="$HOME/.wasixcc/llvm/bin"
+          if [ -d "$LLVM_BIN" ]; then
+            printf "%s\n" "$LLVM_BIN" >> $GITHUB_PATH
+            echo "Added LLVM toolchain to PATH: $LLVM_BIN"
+          else
+            echo "Error: Could not find LLVM installation directory at $LLVM_BIN"
+            exit 1
+          fi
+        fi
+
+    - name: Verify installation
+      shell: sh
+      run: |
+        echo "wasixcc version:"
+        wasixcc --version
