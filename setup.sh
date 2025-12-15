@@ -10,7 +10,7 @@ fail() {
 }
 
 check_command() {
-    if command -v "$1" &> /dev/null ; then
+    if command -v "$1" > /dev/null ; then
         return 0
     else
         return 1
@@ -55,12 +55,6 @@ find_deps() {
         add_to_missing_deps "uname"
     fi
 
-    if check_command tr ; then
-        TR="tr"
-    else
-        add_to_missing_deps "tr"
-    fi
-
     assert_commands
 }
 
@@ -70,11 +64,11 @@ assert_commands() {
         echo "You can install them with your package manager, e.g.:" >&2
         echo "  ${SUDO:-sudo} apt install $MISSING_DEPS" >&2
         if command -v apt >/dev/null 2>&1 ; then
-            echo -ne "Do you want to execute that command now? [y/N]:" >/dev/tty
+            printf "Do you want to execute that command now? [y/N]:" >/dev/tty
             if read -r REPLY </dev/tty ; then
                 case "$REPLY" in
                     [Yy])
-                        ${SUDO:-sudo} apt install $MISSING_DEPS || exit 1
+                        ${SUDO:-sudo} apt install "$MISSING_DEPS" || exit 1
                         return 0
                         ;;
                 esac
@@ -155,7 +149,7 @@ VERSION="0.2.4"
 
 set -x
 
-mkdir -p $WASIXCC_DIR
+mkdir -p "$WASIXCC_DIR"
 
 if test -z "$TARGET" ; then
     echo "Error: Could not detect target platform." >&2
@@ -165,8 +159,8 @@ fi
 # Fetch wasixcc
 fetch_wasixcc() {
     echo "Fetching the latest wasixcc executable" >&2
-    mkdir -p $WASIXCC_DIR
-    cd $WASIXCC_DIR
+    mkdir -p "$WASIXCC_DIR"
+    cd "$WASIXCC_DIR"
     if test -n "$CURL" ; then
         "$CURL" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
     else
@@ -234,7 +228,9 @@ EOF
 
 add_env_files_to_rcs() {
     # Add env files to various shell rc files
+    # shellcheck disable=SC2016
     POSIX_BODY='test -f "$HOME/.wasixcc/env" && . "$HOME/.wasixcc/env"'
+    # shellcheck disable=SC2016
     FISH_BODY='test -f "$HOME/.wasixcc/env" && source "$HOME/.wasixcc/env"'
     XONSH_BODY="import os
     p = os.path.expanduser('~/.wasixcc/env.xsh')
@@ -256,12 +252,13 @@ add_env_files_to_rcs() {
 create_env_files
 add_env_files_to_rcs
 
+# shellcheck disable=SC2016
 echo 'wasixcc installed successfully!
 
 To start using wasixcc, please restart your terminal or
 run the appropriate command to source the environment file for your shell:
 
-. "$HOME/.wasixcc/env"
-source "$HOME/.wasixcc/env"  # For fish
+. ~/.wasixcc/env
+source ~/.wasixcc/env  # For fish
 source $"($nu.home-path)/.wasixcc/env.nu"  # For nushell"
 '
