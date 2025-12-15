@@ -1,12 +1,11 @@
 name: Release
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  #   paths:
-  #     - 'assets/**'
-  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - 'installer/**'
   workflow_dispatch:
 
 jobs:
@@ -20,5 +19,5 @@ jobs:
       - name: Publish website
         run: |
           wasmer --version
-          cd assets
+          cd installer
           wasmer deploy --token "${{ secrets.WASMER_TOKEN }}"
