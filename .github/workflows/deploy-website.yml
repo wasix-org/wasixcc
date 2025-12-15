@@ -20,4 +20,5 @@ jobs:
       - name: Publish website
         run: |
           wasmer --version
-          wasmer deploy assets --token "${{ secrets.WASMER_TOKEN }}"
+          cd assets
+          wasmer deploy --token "${{ secrets.WASMER_TOKEN }}"
