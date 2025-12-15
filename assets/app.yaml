@@ -1,0 +1,5 @@
+name: wasixcc
+app_id: da_RrWI0t5UWVeO
+owner: wasix
+package: .
+kind: wasmer.io/App.v0
