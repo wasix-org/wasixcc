@@ -1,35 +1,47 @@
 #!/usr/bin/env sh
-
 set -xe
 
-MISSING_DEPS=""
+WASIXCC_DIR="$HOME/.wasixcc"
+WASIXCC_BIN="$WASIXCC_DIR/bin"
+WASIXCC_EXECUTABLE="$WASIXCC_DIR/wasixcc"
+
+# If set to latest => latest, if empty => do not install, else use as is
+WASIXCC_SYSROOT_TAG="latest"
+WASIXCC_LLVM_TAG="latest"
+WASIXCC_BINARYEN_TAG="latest"
+
+VERSION="0.2.4"
+TARGET= # detected in detect_target()
+
+log() {
+    echo -- "$1" >&2
+}
 
 fail() {
     echo "Error: $1" >&2
     exit 1
 }
 
-check_command() {
-    if command -v "$1" > /dev/null ; then
-        return 0
-    else
-        return 1
-    fi
+append_block_to_env_file() {
+  file="$1"
+  body="$2"
+
+  # Only touch existing files
+  [ -f "$file" ] || return 0
+
+  # Already installed?
+  grep -Fqs "# >>> wasixcc initialize >>>" "$file" && return 0
+
+  {
+    echo ""
+    echo "# >>> wasixcc initialize >>>"
+    echo "$body"
+    echo "# <<< wasixcc initialize <<<"
+  } >>"$file"
 }
 
-if test -z "$HOME" ; then
-    fail "HOME environment variable is not set."
-fi
-
-add_to_missing_deps() {
-    pkg="$1"
-    if test -n "$pkg" ; then
-        if test -n "$MISSING_DEPS" ; then
-            MISSING_DEPS="$MISSING_DEPS $pkg"
-        else
-            MISSING_DEPS="$pkg"
-        fi
-    fi
+check_command() {
+    command -v "$1" > /dev/null
 }
 
 find_deps() {
@@ -46,43 +58,15 @@ find_deps() {
     if check_command tar ; then
         TAR="tar"
     else
-        add_to_missing_deps "tar"
-    fi
-
-    if check_command uname ; then
-        UNAME="uname"
-    else
-        add_to_missing_deps "uname"
-    fi
-
-    assert_commands
-}
-
-assert_commands() {
-    if test -n "$MISSING_DEPS" ; then
-        echo "Error: Some dependencies are missing \"$MISSING_DEPS\". Please install them and try again." >&2
-        echo "You can install them with your package manager, e.g.:" >&2
-        echo "  ${SUDO:-sudo} apt install $MISSING_DEPS" >&2
-        if command -v apt >/dev/null 2>&1 ; then
-            printf "Do you want to execute that command now? [y/N]:" >/dev/tty
-            if read -r REPLY </dev/tty ; then
-                case "$REPLY" in
-                    [Yy])
-                        ${SUDO:-sudo} apt install "$MISSING_DEPS" || exit 1
-                        return 0
-                        ;;
-                esac
-            fi
-        fi
-        exit 1
+        fail "Could not find tar. Please install it."
     fi
 }
 
 # Set the TARGET variable to the current platform.
 # If it is set to anything other than an empty string then we should have a prebuilt binary for that in our releases.
 detect_target() {
-    OS=$("$UNAME" -s | tr '[:upper:]' '[:lower:]')
-    ARCH=$("$UNAME" -m)
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    ARCH=$(uname -m)
     
     # Normalize OS
     case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*|windows*) OS="windows";; *) echo "Unsupported OS: $OS"; return 1;; esac
@@ -111,54 +95,13 @@ detect_target() {
     esac
 }
 
-append_block_to_env_file() {
-  file="$1"
-  body="$2"
+download_wasixcc() {
+    if test -z "$TARGET" ; then
+        fail "Error: Could not detect target platform."
+    fi
 
-  # Only touch existing files
-  [ -f "$file" ] || return 0
+    log "Fetching the latest wasixcc executable"
 
-  # Already installed?
-  grep -Fqs "# >>> wasixcc initialize >>>" "$file" && return 0
-
-  {
-    echo ""
-    echo "# >>> wasixcc initialize >>>"
-    echo "$body"
-    echo "# <<< wasixcc initialize <<<"
-  } >>"$file"
-}
-
-find_deps
-
-detect_target
-
-WASIXCC_DIR="$HOME/.wasixcc"
-WASIXCC_BIN="$WASIXCC_DIR/bin"
-WASIXCC_EXECUTABLE="$WASIXCC_DIR/wasixcc"
-
-# If set to latest => latest, if empty => do not install, else use as is
-WASIXCC_SYSROOT_TAG="latest"
-WASIXCC_LLVM_TAG="latest"
-WASIXCC_BINARYEN_TAG="latest"
-
-VERSION="0.2.4"
-# TARGET= detected above
-
-# Maybe add a confirmation prompt here
-
-set -x
-
-mkdir -p "$WASIXCC_DIR"
-
-if test -z "$TARGET" ; then
-    echo "Error: Could not detect target platform." >&2
-    exit 1
-fi
-
-# Fetch wasixcc
-fetch_wasixcc() {
-    echo "Fetching the latest wasixcc executable" >&2
     mkdir -p "$WASIXCC_DIR"
     cd "$WASIXCC_DIR"
     if test -n "$CURL" ; then
@@ -167,16 +110,24 @@ fetch_wasixcc() {
         "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
     fi
     cd -
+
+    if test ! -f "$WASIXCC_EXECUTABLE" ; then
+        fail "Error: Failed to download wasixcc executable."
+    fi
+    if ! "$WASIXCC_EXECUTABLE" --version >/dev/null ; then
+        fail "Error: $WASIXCC_EXECUTABLE is not working."
+    fi
+
+    log "Downloaded wasixcc"
 }
 
-# Fetch wasixcc executable
-fetch_wasixcc
+# Install symlinks at ~/.wasixcc/bin
+install_executables() {
+    mkdir -p "$WASIXCC_BIN"
+    "$WASIXCC_EXECUTABLE" --install-executables "$WASIXCC_BIN"
+}
 
-# Install the executables
-mkdir -p "$WASIXCC_BIN"
-"$WASIXCC_EXECUTABLE" --install-executables "$WASIXCC_BIN"
-
-# Download dependencies
+# Download sysroot, LLVM, and Binaryen
 download_dependencies() {
     case "$WASIXCC_SYSROOT_TAG" in
         latest) "$WASIXCC_EXECUTABLE" --download-sysroot ;;
@@ -196,9 +147,6 @@ download_dependencies() {
         *) "$WASIXCC_EXECUTABLE" --download-binaryen "$WASIXCC_BINARYEN_TAG" ;;
     esac
 }
-download_dependencies
-
-# Add to the path of relevant shells config files
 
 # Create env files for various shells
 create_env_files() {
@@ -248,6 +196,19 @@ add_env_files_to_rcs() {
     append_block_to_env_file "$HOME/.xonshrc" "$XONSH_BODY"
     append_block_to_env_file "$HOME/.config/nushell/config.nu" "$NU_BODY"
 }
+
+# Actual script execution starts here
+
+if test -z "$HOME" ; then
+    fail "HOME environment variable is not set."
+fi
+
+find_deps
+detect_target
+
+download_wasixcc
+install_executables
+download_dependencies
 
 create_env_files
 add_env_files_to_rcs
