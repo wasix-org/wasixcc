@@ -105,9 +105,17 @@ download_wasixcc() {
     mkdir -p "$WASIXCC_DIR"
     cd "$WASIXCC_DIR"
     if test -n "$CURL" ; then
-        "$CURL" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
+        if test -n "$GITHUB_TOKEN" ; then
+            "$CURL" -H "authorization: Bearer $GITHUB_TOKEN" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
+        else
+            "$CURL" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
+        fi
     else
-        "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
+        if test -n "$GITHUB_TOKEN" ; then
+            "$WGET" --header "authorization: Bearer $GITHUB_TOKEN" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
+        else
+            "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
+        fi
     fi
     cd -
 
