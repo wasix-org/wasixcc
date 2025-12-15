@@ -1,5 +1,5 @@
-name: wasixcc
-app_id: da_RrWI0t5UWVeO
-owner: wasix
-package: .
 kind: wasmer.io/App.v0
+name: wasixcc
+owner: wasixcc
+package: .
+app_id: da_nzrI7tJU3GkZ
