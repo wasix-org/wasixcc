@@ -1,0 +1,115 @@
+name: Test GitHub Action
+
+on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-action:
+    name: Test Action on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            runner: ubuntu-24.04
+          - name: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm
+          - name: macos-15
+            runner: macos-15
+          - name: macos-15-intel
+            runner: macos-15-intel
+          - name: alpine-3.23-x86_64
+            runner: ubuntu-24.04
+            container: alpine:3.23
+          - name: alpine-3.23-aarch64
+            runner: ubuntu-24.04-arm
+            container: alpine:3.23
+    container: ${{ matrix.container }}
+    
+    steps:
+      - name: Install git (Alpine only)
+        if: contains(matrix.name, 'alpine')
+        run: apk add --no-cache git
+      
+      - name: Clone repository
+        run: |
+          git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
+      
+      - name: Setup wasixcc with all components
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Verify wasixcc installation
+        run: |
+          echo "Testing wasixcc..."
+          wasixcc --version
+          
+          echo "Testing wasix++..."
+          wasix++ --version || echo "wasix++ not found"
+          
+          echo "Checking sysroot..."
+          wasixcc --print-sysroot
+          
+          echo "Verifying wasm-opt is in PATH and from wasixcc installation..."
+          if command -v wasm-opt >/dev/null 2>&1; then
+            WASM_OPT_PATH=$(command -v wasm-opt)
+            echo "wasm-opt found at: $WASM_OPT_PATH"
+            if echo "$WASM_OPT_PATH" | grep -q "\.wasixcc/binaryen"; then
+              echo "✓ wasm-opt correctly from wasixcc installation"
+              wasm-opt --version
+            else
+              echo "✗ wasm-opt found but not from wasixcc installation (found at: $WASM_OPT_PATH)"
+              exit 1
+            fi
+          else
+            echo "✗ wasm-opt NOT found in PATH (expected to be available from wasixcc)"
+            exit 1
+          fi
+          
+          echo "Verifying clang is NOT in PATH from wasixcc installation..."
+          if command -v clang >/dev/null 2>&1; then
+            CLANG_PATH=$(command -v clang)
+            echo "clang found at: $CLANG_PATH"
+            if echo "$CLANG_PATH" | grep -q "\.wasixcc/llvm"; then
+              echo "✗ clang found in wasixcc installation (expected to NOT be in PATH by default)"
+              exit 1
+            else
+              echo "✓ clang found but not from wasixcc (preinstalled version, which is fine)"
+            fi
+          else
+            echo "✓ clang correctly NOT in PATH"
+          fi
+      
+      - name: Create and compile C program
+        run: |
+          cat > hello.c << 'EOF'
+          #include <stdio.h>
+          int main() {
+              printf("Hello from WASIX!\n");
+              return 0;
+          }
+          EOF
+          wasixcc hello.c -o hello.wasm
+          ls -lh hello.wasm
+      
+      - name: Create and compile C++ program
+        run: |
+          cat > hello.cpp << 'EOF'
+          #include <iostream>
+          int main() {
+              std::cout << "Hello from WASIX C++!" << std::endl;
+              return 0;
+          }
+          EOF
+          wasix++ hello.cpp -o hello_cpp.wasm
+          ls -lh hello_cpp.wasm
+
