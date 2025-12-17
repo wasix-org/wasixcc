@@ -21,14 +21,14 @@ flags for the WASIX platform.
 curl -fsSL https://wasix.cc | sh
 ```
 
-The installer will install wasixcc and it's dependencies to `~/.wasixcc`
+The installer will install wasixcc and its dependencies to `~/.wasixcc`
 
 <details>
   <summary>Other installation options</summary>
   
-  _If you dont use the installer (or the github action)_
+  _If you don't use the installer (or the github action)_
 
-- From [crates.io](https://crates.io/crates/wasixcc") (macOS, Linux)
+- From [crates.io](https://crates.io/crates/wasixcc) (macOS, Linux)
 
   ```sh
   cargo install wasixcc

@@ -69,10 +69,10 @@ detect_target() {
     ARCH=$(uname -m)
     
     # Normalize OS
-    case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*|windows*) OS="windows";; *) echo "Unsupported OS: $OS"; return 1;; esac
+    case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*|windows*) OS="windows";; *) fail "Unsupported OS: $OS" ;; esac
     
     # Normalize architecture
-    case "$ARCH" in x86_64|amd64) ARCH="x86_64";; aarch64|arm64) ARCH="aarch64";; *) echo "Unsupported architecture: $ARCH"; return 1;; esac
+    case "$ARCH" in x86_64|amd64) ARCH="x86_64";; aarch64|arm64) ARCH="aarch64";; *) fail "Unsupported architecture: $ARCH" ;; esac
     
     # Construct target triple
     if [ "$OS" = "linux" ]; then
@@ -117,7 +117,7 @@ download_wasixcc() {
             "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
         fi
     fi
-    cd -
+    cd - > /dev/null 2>&1
 
     if test ! -f "$WASIXCC_EXECUTABLE" ; then
         fail "Error: Failed to download wasixcc executable."
