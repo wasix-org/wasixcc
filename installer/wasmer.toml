@@ -1,13 +1,13 @@
 [dependencies]
-"wasmer/static-web-server" = "^1"
+"python/python" = "^3"
 
 [fs]
 "/public" = "public"
 
 [[command]]
 name = "script"
-module = "wasmer/static-web-server:webserver"
+module = "python/python:python"
 runner = "https://webc.org/runner/wasi"
 
 [command.annotations.wasi]
-main-args = ["--config-file", "/public/config.toml"]
+main-args = ["/public/server.py"]
