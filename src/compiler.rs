@@ -2,6 +2,8 @@ use std::{env, path::absolute};
 
 use super::*;
 
+mod response_file;
+
 static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     [
         "-MT",
@@ -612,6 +614,85 @@ fn prepare_compiler_args(
     user_settings: &mut UserSettings,
     run_cxx: bool,
 ) -> Result<(PreparedArgs, BuildSettings)> {
+    fn process_one_arg(
+        arg: String,
+        next_arg: &mut Option<String>,
+        user_settings: &mut UserSettings,
+        build_settings: &mut BuildSettings,
+        result: &mut PreparedArgs,
+    ) -> Result<()> {
+        if let Some(arg) = arg.strip_prefix("-Wl,") {
+            for split in arg.split(',') {
+                result.linker_args.push(split.to_owned());
+            }
+        } else if arg == "-Xlinker" {
+            let Some(next_arg) = next_arg.take() else {
+                bail!("Expected argument after -Xlinker");
+            };
+            result.linker_args.push(next_arg);
+        } else if arg == "-z" {
+            let Some(next_arg) = next_arg.take() else {
+                bail!("Expected argument after -z");
+            };
+            result.linker_args.push("-z".to_owned());
+            result.linker_args.push(next_arg);
+        } else if arg == "-o" {
+            let Some(next_arg) = next_arg.take() else {
+                bail!("Expected argument after -o");
+            };
+            let output = PathBuf::from(next_arg);
+            if user_settings.module_kind.is_none() {
+                if let Some(module_kind) = output.extension().and_then(deduce_module_kind) {
+                    user_settings.module_kind = Some(module_kind);
+                }
+            }
+            result.output = Some(output);
+        } else if arg.starts_with('-') {
+            if update_build_settings_from_arg(&arg, build_settings, user_settings)? {
+                // Read the value early so it's also discarded if we discard the flag
+                let next_arg = if CLANG_FLAGS_WITH_ARGS.contains(arg.as_str()) {
+                    next_arg.take()
+                } else {
+                    None
+                };
+
+                if CLANG_FLAGS_TO_DISCARD.iter().any(|flag| {
+                    arg.strip_prefix(flag)
+                        .is_some_and(|value| value.is_empty() || value.starts_with('='))
+                }) {
+                    return Ok(());
+                }
+
+                let args_list = if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD
+                    .iter()
+                    .any(|flag| arg.starts_with(flag))
+                {
+                    &mut result.linker_args
+                } else {
+                    &mut result.compiler_args
+                };
+
+                args_list.push(arg);
+                if let Some(next_arg) = next_arg {
+                    args_list.push(next_arg);
+                }
+            }
+        } else {
+            // Assume it's an input file
+            let input = PathBuf::from(&arg);
+            match input.extension().and_then(|ext| ext.to_str()) {
+                Some("a") | Some("o") | Some("obj") | Some("so") => {
+                    result.linker_inputs.push(PathBuf::from(arg));
+                }
+                _ => {
+                    result.compiler_inputs.push(PathBuf::from(arg));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     let mut result = PreparedArgs {
         compiler_args: Vec::new(),
         linker_args: Vec::new(),
@@ -651,82 +732,29 @@ fn prepare_compiler_args(
         },
     );
 
-    let mut iter = extra_flags
-        .into_iter()
-        .chain(extra_flags2)
-        .chain(args)
-        .chain(extra_post_flags)
-        .chain(extra_post_flags2);
-
-    while let Some(arg) = iter.next() {
-        if let Some(arg) = arg.strip_prefix("-Wl,") {
-            for split in arg.split(',') {
-                result.linker_args.push(split.to_owned());
-            }
-        } else if arg == "-Xlinker" {
-            let Some(next_arg) = iter.next() else {
-                bail!("Expected argument after -Xlinker");
-            };
-            result.linker_args.push(next_arg);
-        } else if arg == "-z" {
-            let Some(next_arg) = iter.next() else {
-                bail!("Expected argument after -z");
-            };
-            result.linker_args.push("-z".to_owned());
-            result.linker_args.push(next_arg);
-        } else if arg == "-o" {
-            let Some(next_arg) = iter.next() else {
-                bail!("Expected argument after -o");
-            };
-            let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none() {
-                if let Some(module_kind) = output.extension().and_then(deduce_module_kind) {
-                    user_settings.module_kind = Some(module_kind);
-                }
-            }
-            result.output = Some(output);
-        } else if arg.starts_with('-') {
-            if update_build_settings_from_arg(&arg, &mut build_settings, user_settings)? {
-                // Read the value early so it's also discarded if we discard the flag
-                let next_arg = if CLANG_FLAGS_WITH_ARGS.contains(arg.as_str()) {
-                    iter.next()
-                } else {
-                    None
-                };
-
-                if CLANG_FLAGS_TO_DISCARD.iter().any(|flag| {
-                    arg.strip_prefix(flag)
-                        .is_some_and(|value| value.is_empty() || value.starts_with('='))
-                }) {
-                    continue;
-                }
-
-                let args_list = if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD
-                    .iter()
-                    .any(|flag| arg.starts_with(flag))
-                {
-                    &mut result.linker_args
-                } else {
-                    &mut result.compiler_args
-                };
-
-                args_list.push(arg);
-                if let Some(next_arg) = next_arg {
-                    args_list.push(next_arg);
-                }
-            }
+    extra_flags.extend(extra_flags2);
+    extra_flags.extend(args);
+    extra_flags.extend(extra_post_flags);
+    extra_flags.extend(extra_post_flags2);
+    let mut args = response_file::ArgumentsStack::new(extra_flags);
+    let mut next_arg = None;
+    loop {
+        let arg = if let Some(arg) = next_arg.take() {
+            arg
+        } else if let Some(arg) = args.next()? {
+            arg
         } else {
-            // Assume it's an input file
-            let input = PathBuf::from(&arg);
-            match input.extension().and_then(|ext| ext.to_str()) {
-                Some("a") | Some("o") | Some("obj") | Some("so") => {
-                    result.linker_inputs.push(PathBuf::from(arg));
-                }
-                _ => {
-                    result.compiler_inputs.push(PathBuf::from(arg));
-                }
-            }
-        }
+            break;
+        };
+
+        next_arg = args.next()?;
+        process_one_arg(
+            arg,
+            &mut next_arg,
+            user_settings,
+            &mut build_settings,
+            &mut result,
+        )?;
     }
 
     if user_settings.module_kind.is_none() {
@@ -760,19 +788,14 @@ fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let mut result = PreparedArgs {
-        compiler_args: Vec::new(),
-        linker_args: Vec::new(),
-        compiler_inputs: Vec::new(),
-        linker_inputs: Vec::new(),
-        output: None,
-    };
-
-    let mut iter = args.into_iter();
-
-    while let Some(arg) = iter.next() {
+    fn process_one_arg(
+        arg: String,
+        next_arg: &mut Option<String>,
+        user_settings: &mut UserSettings,
+        result: &mut PreparedArgs,
+    ) -> Result<()> {
         if arg == "-o" {
-            let Some(next_arg) = iter.next() else {
+            let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -o");
             };
             let output = PathBuf::from(next_arg);
@@ -786,7 +809,7 @@ fn prepare_linker_args(
             let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
             result.linker_args.push(arg);
             if has_next_arg {
-                if let Some(next_arg) = iter.next() {
+                if let Some(next_arg) = next_arg.take() {
                     result.linker_args.push(next_arg);
                 }
             }
@@ -794,6 +817,31 @@ fn prepare_linker_args(
             // Assume it's an input file
             result.linker_inputs.push(PathBuf::from(arg));
         }
+
+        Ok(())
+    }
+
+    let mut result = PreparedArgs {
+        compiler_args: Vec::new(),
+        linker_args: Vec::new(),
+        compiler_inputs: Vec::new(),
+        linker_inputs: Vec::new(),
+        output: None,
+    };
+
+    let mut args = response_file::ArgumentsStack::new(args);
+    let mut next_arg = None;
+    loop {
+        let arg = if let Some(arg) = next_arg.take() {
+            arg
+        } else if let Some(arg) = args.next()? {
+            arg
+        } else {
+            break;
+        };
+
+        next_arg = args.next()?;
+        process_one_arg(arg, &mut next_arg, user_settings, &mut result)?;
     }
 
     if user_settings.module_kind.is_none() {
