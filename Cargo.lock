@@ -397,7 +397,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2",
  "tokio",
  "tower-service",
  "tracing",
@@ -740,7 +740,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2",
  "thiserror",
  "tokio",
  "tracing",
@@ -777,9 +777,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1062,6 +1062,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1078,16 +1084,6 @@ name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
-
-[[package]]
-name = "socket2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
-dependencies = [
- "libc",
- "windows-sys 0.52.0",
-]
 
 [[package]]
 name = "socket2"
@@ -1234,7 +1230,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "slab",
- "socket2 0.6.1",
+ "socket2",
  "windows-sys 0.59.0",
 ]
 
@@ -1443,6 +1439,7 @@ dependencies = [
  "regex",
  "reqwest",
  "serde",
+ "shell-words",
  "tar",
  "tempfile",
  "tower",
