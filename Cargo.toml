@@ -36,6 +36,7 @@ tower = "=0.5.2"
 tower-layer = "=0.3.3"
 tower-service = "=0.3.3"
 fs_extra = "1.3.0"
+shell-words = "1.1.1"
 
 # We're not building for WASIX yet, so let's take the official packages for now
 # [patch.crates-io]
