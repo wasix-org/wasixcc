@@ -31,7 +31,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 
 # Pinned dependencies for WASIX builds
 getrandom = "=0.3.3"
-reqwest = { version = "=0.12.22", features = ["blocking", "json"] }
+reqwest = { version = "=0.12.22", features = ["blocking", "charset", "h2", "http2", "json", "rustls-tls"], default-features = false }
 tower = "=0.5.2"
 tower-layer = "=0.3.3"
 tower-service = "=0.3.3"
