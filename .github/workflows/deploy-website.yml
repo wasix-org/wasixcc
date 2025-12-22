@@ -19,5 +19,6 @@ jobs:
       - name: Publish website
         run: |
           wasmer --version
+          wasmer whoami --token "${{ secrets.WASMER_TOKEN }}"
           cd installer
           wasmer deploy --token "${{ secrets.WASMER_TOKEN }}"
