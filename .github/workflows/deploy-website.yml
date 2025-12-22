@@ -1,0 +1,23 @@
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'installer/**'
+  workflow_dispatch:
+
+jobs:
+  deploy-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Wasmer
+        uses: wasmerio/setup-wasmer@v3.1
+      - name: Publish website
+        run: |
+          wasmer --version
+          cd installer
+          wasmer deploy --token "${{ secrets.WASMER_TOKEN }}"

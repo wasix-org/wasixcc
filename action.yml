@@ -141,7 +141,7 @@ runs:
         VERSION="${{ inputs.version }}"
         if [ "$VERSION" = "latest" ]; then
           if [ -n "$GITHUB_TOKEN" ]; then
-            VERSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+            VERSION=$(curl -s -H "authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
           else
             VERSION=$(curl -s https://api.github.com/repos/wasix-org/wasixcc/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
           fi
@@ -163,7 +163,7 @@ runs:
         DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
         
         if [ -n "$GITHUB_TOKEN" ]; then
-          curl -L -H "Authorization: token $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
+          curl -L -H "authorization: Bearer $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
         else
           curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
         fi
