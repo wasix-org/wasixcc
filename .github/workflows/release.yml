@@ -10,7 +10,68 @@ permissions:
   contents: write
 
 jobs:
+  verify-version:
+    name: Verify Version Consistency
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: extract
+        run: |
+          # Get the tag name from the ref
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Tag: $TAG"
+
+          # Remove 'v' prefix to get version
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Verify Cargo.toml version
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "ERROR: Cargo.toml version ($CARGO_VERSION) does not match tag version ($VERSION)"
+            exit 1
+          fi
+          echo "✓ Cargo.toml version matches"
+
+      - name: Verify wasmer.toml version
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          WASMER_VERSION=$(grep '^version = ' wasmer.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "wasmer.toml version: $WASMER_VERSION"
+
+          if [ "$WASMER_VERSION" != "$VERSION" ]; then
+            echo "ERROR: wasmer.toml version ($WASMER_VERSION) does not match tag version ($VERSION)"
+            exit 1
+          fi
+          echo "✓ wasmer.toml version matches"
+
+      - name: Verify install.sh version
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          INSTALL_VERSION=$(grep '^VERSION=' installer/public/install.sh | head -1 | sed 's/VERSION="\(.*\)"/\1/')
+          echo "install.sh version: $INSTALL_VERSION"
+
+          if [ "$INSTALL_VERSION" != "$VERSION" ]; then
+            echo "ERROR: install.sh version ($INSTALL_VERSION) does not match tag version ($VERSION)"
+            exit 1
+          fi
+          echo "✓ install.sh version matches"
+
+      - name: Version verification complete
+        run: |
+          echo "✓ All version checks passed for version ${{ steps.extract.outputs.version }}"
+
   build:
+    needs: verify-version
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -35,24 +96,24 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-15-intel
             cross: false
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      
+
       - name: Install cargo-binstall
         if: matrix.cross
         uses: cargo-bins/cargo-binstall@main
-      
+
       - name: Install cross-compilation tools
         if: matrix.cross
         run: |
           cargo binstall --no-confirm cross
-      
+
       - name: Build binary (cross)
         if: matrix.cross
         run: |
@@ -64,7 +125,7 @@ jobs:
       - name: Build binary (cargo)
         if: "!matrix.cross"
         run: cargo build --release --target ${{ matrix.target }} -F bin --bin wasixcc
-      
+
       - name: Package binary
         shell: bash
         run: |
@@ -72,29 +133,29 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ${BINARY_NAME}-${{ matrix.target }}.tar.gz ${BINARY_NAME}
           mv ${BINARY_NAME}-${{ matrix.target }}.tar.gz ../../../
-      
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: wasixcc-${{ matrix.target }}
           path: wasixcc-${{ matrix.target }}.tar.gz
-  
+
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Move artifacts to root
         run: |
           find artifacts -name '*.tar.gz' -exec mv {} . \;
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -103,3 +164,32 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
+
+  publish-crates-io:
+    name: Publish to crates.io
+    needs: [verify-version, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify version matches
+        run: |
+          VERSION="${{ needs.verify-version.outputs.version }}"
+          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "Publishing version: $VERSION"
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "ERROR: Version mismatch detected"
+            exit 1
+          fi
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
