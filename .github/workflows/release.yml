@@ -22,8 +22,21 @@ jobs:
         id: extract
         run: |
           # Get the tag name from the ref
+          if [ -z "$GITHUB_REF" ] || [ "$GITHUB_REF" = "refs/heads/"* ]; then
+            echo "ERROR: This workflow must be triggered by a tag push (refs/tags/v*)"
+            echo "Current GITHUB_REF: $GITHUB_REF"
+            exit 1
+          fi
+
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Tag: $TAG"
+
+          # Verify tag starts with 'v'
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "ERROR: Tag must be in the format 'vX.Y.Z' (e.g., v0.2.5)"
+            echo "Current tag: $TAG"
+            exit 1
+          fi
 
           # Remove 'v' prefix to get version
           VERSION="${TAG#v}"
@@ -174,18 +187,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Verify version matches
-        run: |
-          VERSION="${{ needs.verify-version.outputs.version }}"
-          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "Publishing version: $VERSION"
-          echo "Cargo.toml version: $CARGO_VERSION"
-
-          if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "ERROR: Version mismatch detected"
-            exit 1
-          fi
 
       - name: Publish to crates.io
         env:
