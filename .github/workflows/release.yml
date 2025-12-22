@@ -22,16 +22,24 @@ jobs:
         id: extract
         run: |
           # Get the tag name from the ref
-          if [ -z "$GITHUB_REF" ] || [ "$GITHUB_REF" = "refs/heads/"* ]; then
+          # For workflow_dispatch, GITHUB_REF should still contain a tag if pushed to a tag
+          if [ -z "$GITHUB_REF" ]; then
+            echo "ERROR: GITHUB_REF is empty"
+            exit 1
+          fi
+
+          # Check if this is a tag reference
+          if [[ ! "$GITHUB_REF" =~ refs/tags/ ]]; then
             echo "ERROR: This workflow must be triggered by a tag push (refs/tags/v*)"
             echo "Current GITHUB_REF: $GITHUB_REF"
+            echo "Manual workflow_dispatch should be triggered from a tag, not a branch"
             exit 1
           fi
 
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Tag: $TAG"
 
-          # Verify tag starts with 'v'
+          # Verify tag starts with 'v' and follows semantic versioning
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             echo "ERROR: Tag must be in the format 'vX.Y.Z' (e.g., v0.2.5)"
             echo "Current tag: $TAG"
@@ -46,7 +54,7 @@ jobs:
       - name: Verify Cargo.toml version
         run: |
           VERSION="${{ steps.extract.outputs.version }}"
-          CARGO_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep -E '^\s*version\s*=\s*' Cargo.toml | head -1 | sed -E 's/.*=\s*['"'"'"]([^'"'"'"]+)['"'"'"].*/\1/')
           echo "Cargo.toml version: $CARGO_VERSION"
 
           if [ "$CARGO_VERSION" != "$VERSION" ]; then
@@ -58,7 +66,7 @@ jobs:
       - name: Verify wasmer.toml version
         run: |
           VERSION="${{ steps.extract.outputs.version }}"
-          WASMER_VERSION=$(grep '^version = ' wasmer.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          WASMER_VERSION=$(grep -E '^\s*version\s*=\s*' wasmer.toml | head -1 | sed -E 's/.*=\s*['"'"'"]([^'"'"'"]+)['"'"'"].*/\1/')
           echo "wasmer.toml version: $WASMER_VERSION"
 
           if [ "$WASMER_VERSION" != "$VERSION" ]; then
@@ -70,7 +78,7 @@ jobs:
       - name: Verify install.sh version
         run: |
           VERSION="${{ steps.extract.outputs.version }}"
-          INSTALL_VERSION=$(grep '^VERSION=' installer/public/install.sh | head -1 | sed 's/VERSION="\(.*\)"/\1/')
+          INSTALL_VERSION=$(grep -E '^\s*VERSION\s*=\s*' installer/public/install.sh | head -1 | sed -E 's/.*=\s*['"'"'"]([^'"'"'"]+)['"'"'"].*/\1/')
           echo "install.sh version: $INSTALL_VERSION"
 
           if [ "$INSTALL_VERSION" != "$VERSION" ]; then
@@ -193,4 +201,4 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+          cargo publish
