@@ -1,6 +1,6 @@
 [package]
 name = "wasixcc"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/wasix-org/wasixcc"
@@ -31,7 +31,14 @@ serde = { version = "1.0.219", features = ["derive"] }
 
 # Pinned dependencies for WASIX builds
 getrandom = "=0.3.3"
-reqwest = { version = "=0.12.22", features = ["blocking", "charset", "h2", "http2", "json", "rustls-tls"], default-features = false }
+reqwest = { version = "=0.12.22", features = [
+    "blocking",
+    "charset",
+    "h2",
+    "http2",
+    "json",
+    "rustls-tls",
+], default-features = false }
 tower = "=0.5.2"
 tower-layer = "=0.3.3"
 tower-service = "=0.3.3"
