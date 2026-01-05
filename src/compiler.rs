@@ -1420,7 +1420,10 @@ mod tests {
         // Read and verify the script contents
         let script_content = fs::read_to_string(&output_path).unwrap();
         assert!(script_content.starts_with("#! /bin/sh"));
-        assert!(script_content.contains("SCRIPT_DIR=$(cd -- \"$(dirname -- \"$(realpath \"$0\" )\" )\" && pwd)"));
+        assert!(
+            script_content
+                .contains("SCRIPT_DIR=$(cd -- \"$(dirname -- \"$(realpath \"$0\" )\" )\" && pwd)")
+        );
         assert!(script_content.contains("wasmer run"));
         assert!(script_content.contains("--forward-host-env"));
         assert!(script_content.contains("--net"));
@@ -1433,7 +1436,10 @@ mod tests {
             // Verify the script is executable
             let metadata = fs::metadata(&output_path).unwrap();
             let permissions = metadata.permissions();
-            assert!(permissions.mode() & 0o111 != 0, "Script should be executable");
+            assert!(
+                permissions.mode() & 0o111 != 0,
+                "Script should be executable"
+            );
         }
     }
 
