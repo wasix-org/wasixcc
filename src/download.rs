@@ -1,6 +1,6 @@
 use std::{fmt::Display, fs, path::Path, str::FromStr};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
 use reqwest::header::HeaderMap;
 
@@ -60,7 +60,9 @@ impl FromStr for TagSpec {
         } else if s.starts_with('v') || s.starts_with("version_") {
             Ok(TagSpec::Tag(s.to_string()))
         } else {
-            bail!("Invalid tag specification: `{s}`. Use 'latest', a tag starting with 'v', or 'version_XXX'.");
+            bail!(
+                "Invalid tag specification: `{s}`. Use 'latest', a tag starting with 'v', or 'version_XXX'."
+            );
         }
     }
 }
@@ -292,9 +294,7 @@ pub(crate) fn download_binaryen(
         .assets
         .iter()
         .find(|a| a.name.ends_with(&asset_suffix))
-        .with_context(|| {
-            format!("Could not find binaryen asset for the current platform in release")
-        })?;
+        .context("Could not find binaryen asset for the current platform in release")?;
 
     download_asset(asset, &target_dir, &client)
         .with_context(|| format!("Failed to download and unpack asset '{}'", asset.name))?;
@@ -324,8 +324,8 @@ pub(crate) fn download_binaryen(
         use std::os::unix::fs::PermissionsExt;
         eprintln!("Target dir: {}", target_dir.display());
 
-        for entry in std::fs::read_dir(target_dir.join(format!("bin")))
-            .context("Failed to read bin directory")?
+        for entry in
+            std::fs::read_dir(target_dir.join("bin")).context("Failed to read bin directory")?
         {
             let entry = entry.context("Failed to read bin directory entry")?;
             if entry

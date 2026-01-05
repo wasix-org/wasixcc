@@ -8,7 +8,7 @@ use std::{
     sync::LazyLock,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::{compiler::ModuleKind, download::TagSpec};
 
@@ -537,12 +537,16 @@ mod tests {
     #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
         let args = vec!["-sFOO=bar".to_string()];
-        env::remove_var("WASIXCC_FOO");
+        unsafe {
+            env::remove_var("WASIXCC_FOO");
+        }
         let got = try_get_user_setting_value("FOO", &args).unwrap();
         assert_eq!(got, Some("bar".to_string()));
         // fallback to env
         let args2: Vec<String> = Vec::new();
-        env::set_var("WASIXCC_FOO", "baz");
+        unsafe {
+            env::set_var("WASIXCC_FOO", "baz");
+        }
         let got2 = try_get_user_setting_value("FOO", &args2).unwrap();
         assert_eq!(got2, Some("baz".to_string()));
     }
@@ -559,7 +563,9 @@ mod tests {
             "-sWASM_EXCEPTIONS=yes".to_string(),
             "-sPIC=false".to_string(),
         ];
-        env::remove_var("WASIXCC_LINKER_FLAGS");
+        unsafe {
+            env::remove_var("WASIXCC_LINKER_FLAGS");
+        }
         let settings = gather_user_settings(&args).unwrap();
         assert_eq!(settings.sysroot_location, Some(PathBuf::from("/sys")));
         assert_eq!(
