@@ -1053,7 +1053,8 @@ fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
 mod tests {
     use super::*;
     use crate::UserSettings;
-    use std::{ffi::OsStr, path::PathBuf};
+    use std::{ffi::OsStr, fs, path::PathBuf};
+    use tempfile::TempDir;
 
     #[test]
     fn test_deduce_module_kind() {
@@ -1386,9 +1387,6 @@ mod tests {
 
     #[test]
     fn test_generate_shell_script_default_args() {
-        use std::fs;
-        use tempfile::TempDir;
-
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("testprog");
 
@@ -1441,9 +1439,6 @@ mod tests {
 
     #[test]
     fn test_generate_shell_script_custom_args() {
-        use std::fs;
-        use tempfile::TempDir;
-
         let temp_dir = TempDir::new().unwrap();
         let output_path = temp_dir.path().join("testprog");
 
