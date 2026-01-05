@@ -668,7 +668,7 @@ fn generate_shell_script(state: &State) -> Result<()> {
         writeln!(file, "#! /bin/sh")?;
         writeln!(
             file,
-            r#"SCRIPT_DIR=$(cd -- "$(dirname -- "$(realpath $0)")" && pwd)"#
+            r#"SCRIPT_DIR=$(cd -- "$(dirname -- "$(realpath "$0" )" )" && pwd)"#
         )?;
         write!(file, "wasmer run ")?;
         for arg in wasmer_args {
@@ -677,7 +677,7 @@ fn generate_shell_script(state: &State) -> Result<()> {
         // TODO: this fails for non-UTF8 paths
         writeln!(
             file,
-            r#""$SCRIPT_DIR/{}" -- $@"#,
+            r#""$SCRIPT_DIR/{}" -- "$@""#,
             output_file_name.display()
         )?;
 
