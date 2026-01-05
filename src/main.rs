@@ -153,8 +153,8 @@ The following configuration options are available:");
                            point to the installation directory of the
                            toolchain, NOT the bin directory inside it; tools
                            will be executed from LLVM_LOCATION/bin/tool-name.
-                           If this option is left out, LLVM binaries will be
-                           invoked with a -21 version suffix (e.g. clang-21).
+  BINARYEN_LOCATION=<PATH> Set the location of the binaryen installation,
+                           which will be used to invoke the wasm-opt binary.
   COMPILER_FLAGS=<FLAGS>   Extra flags to pass to the compiler, separated
                            by colons (':')
   COMPILER_POST_FLAGS=<FLAGS>
@@ -240,6 +240,27 @@ The following configuration options are available:");
                            this option to `false`. This option is only
                            relevant for dynamic main modules and shared
                            libraries.
+  GENERATE_SHELL_SCRIPT=<BOOL>
+                           Whether to generate shell scripts for running
+                           the resulting binary like a normal native program.
+                           This setting applies to executables only.  This is
+                           useful for running builds that don't have proper
+                           support for cross-compilation. Such builds will
+                           build a binary and assume they can run it
+                           immediately. This option will append a .wasm
+                           extension to the output file name, and generate
+                           a shell script with the original output name that,
+                           once called, will run the wasm binary with wasmer
+                           and pass all arguments through to it. 
+  SHELL_SCRIPT_WASMER_ARGS=<FLAGS>
+                           Additional arguments to be passed to wasmer in
+                           the shell script. There will be a $SCRIPT_DIR
+                           variable in the script pointing to the script's
+                           directory. The default is to pass `--dir $SCRIPT_DIR
+                           --cwd $SCRIPT_DIR --net --forward-host-env`. Specifying
+                           a non-empty list will *override* the default
+                           rather than be appended to it.  Options must be
+                           separated with colons (':').
 
 Note: Pass-through options are passed directly to the underlying
 LLVM executables (e.g., clang, wasm-ld, etc.). This is useful for

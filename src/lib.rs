@@ -133,6 +133,8 @@ struct UserSettings {
     wasm_exceptions: bool,                      // key name: WASM_EXCEPTIONS
     pic: bool,                                  // key name: PIC
     link_symbolic: bool,                        // key name: LINK_SYMBOLIC
+    generate_shell_script: bool,                // key name: GENERATE_SHELL_SCRIPT
+    shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
 }
 
 impl UserSettings {
@@ -413,6 +415,18 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => true,
     };
 
+    let generate_shell_script = match try_get_user_setting_value("GENERATE_SHELL_SCRIPT", args)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for GENERATE_SHELL_SCRIPT"))?,
+        None => false,
+    };
+
+    let shell_script_wasmer_args =
+        match try_get_user_setting_value("SHELL_SCRIPT_WASMER_ARGS", args)? {
+            Some(flags) => read_string_list_user_setting(&flags),
+            None => vec![],
+        };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -434,6 +448,8 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         wasm_exceptions,
         pic,
         link_symbolic,
+        generate_shell_script,
+        shell_script_wasmer_args,
     })
 }
 

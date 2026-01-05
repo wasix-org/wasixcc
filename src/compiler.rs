@@ -1,4 +1,7 @@
-use std::{env, path::absolute};
+use std::{env, io::Write, path::absolute};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 
@@ -201,6 +204,12 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
         }
     }
 
+    if state.user_settings.module_kind().is_executable()
+        && state.user_settings.generate_shell_script
+    {
+        generate_shell_script(&state)?;
+    }
+
     tracing::info!("Done");
     Ok(())
 }
@@ -253,8 +262,8 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
     Ok(())
 }
 
-fn output_path(state: &State) -> &Path {
-    if let Some(output) = &state.args.output {
+fn output_path(state: &State) -> Result<PathBuf> {
+    let output_path = if let Some(output) = &state.args.output {
         output.as_path()
     } else {
         match state.user_settings.module_kind() {
@@ -263,7 +272,48 @@ fn output_path(state: &State) -> &Path {
             }
             ModuleKind::ObjectFile => Path::new("a.o"),
         }
+    };
+
+    if state.user_settings.generate_shell_script {
+        match output_path.extension() {
+            Some(ext) if ext == OsStr::new("wasm") => Ok(output_path.to_owned()),
+            _ => {
+                let Some(file_name) = output_path.file_name() else {
+                    bail!(
+                        "Cannot deduce output file name from path: {}",
+                        output_path.display()
+                    )
+                };
+                let mut file_name = file_name.to_os_string();
+                file_name.push(".wasm");
+                Ok(output_path.with_file_name(file_name))
+            }
+        }
+    } else {
+        Ok(output_path.to_owned())
     }
+}
+
+fn shell_script_path(state: &State) -> Result<(PathBuf, OsString)> {
+    assert!(
+        state.user_settings.generate_shell_script,
+        "Should only call this function when shell scripts are requested"
+    );
+
+    let output_path = output_path(state)?;
+    assert!(
+        matches!(output_path.extension(), Some(ext) if ext == OsStr::new("wasm")),
+        "Output file name must have a .wasm extension"
+    );
+
+    let output_file_name = output_path
+        .file_name()
+        .expect("Output path should have a file name")
+        .to_owned();
+
+    let mut script_path = output_path;
+    assert!(script_path.set_extension(""));
+    Ok((script_path, output_file_name))
 }
 
 fn compile_inputs(state: &mut State) -> Result<()> {
@@ -511,7 +561,7 @@ fn link_inputs(state: &State) -> Result<()> {
     }
 
     command.arg("-o");
-    command.arg(output_path(state));
+    command.arg(output_path(state)?);
 
     run_command(command)
 }
@@ -580,10 +630,10 @@ fn run_wasm_opt(state: &State) -> Result<()> {
 
     command.args(WASM_OPT_ENABLED_FEATURES);
 
-    let output_path = output_path(state);
+    let output_path = output_path(state)?;
 
     command.arg("-o");
-    command.arg(output_path);
+    command.arg(&output_path);
 
     if state.user_settings.wasm_opt_preserve_unoptimized {
         let tempdir = tempfile::TempDir::new()
@@ -604,9 +654,88 @@ fn run_wasm_opt(state: &State) -> Result<()> {
             }
         }
     } else {
-        command.arg(output_path);
+        command.arg(&output_path);
         run_command(command)
     }
+}
+
+fn generate_shell_script(state: &State) -> Result<()> {
+    fn write_file(
+        file: &mut std::fs::File,
+        output_file_name: &OsStr,
+        wasmer_args: &[impl AsRef<str>],
+    ) -> std::io::Result<()> {
+        writeln!(file, "#! /bin/sh")?;
+        writeln!(
+            file,
+            r#"if [ -n "${{0%%/*}}" ]; then
+  SCRIPT_PATH=$(command -v "$0")
+else
+  SCRIPT_PATH=$0
+fi
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"#
+        )?;
+        write!(file, "wasmer run ")?;
+        for arg in wasmer_args {
+            write!(file, r#""{}" "#, arg.as_ref())?;
+        }
+        // TODO: this fails for non-UTF8 paths
+        write!(
+            file,
+            r#""$SCRIPT_DIR/{}" -- $@"#,
+            output_file_name.display()
+        )?;
+
+        Ok(())
+    }
+
+    let (script_path, output_file_name) = shell_script_path(state)?;
+
+    tracing::info!("Generating shell script at {}", script_path.display());
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&script_path)
+        .context("Failed to open shell script file")?;
+
+    if state.user_settings.shell_script_wasmer_args.is_empty() {
+        write_file(
+            &mut file,
+            &output_file_name,
+            &[
+                "--forward-host-env",
+                "--net",
+                "--dir",
+                "$SCRIPT_DIR",
+                "--cwd",
+                "$SCRIPT_DIR",
+            ],
+        )
+    } else {
+        write_file(
+            &mut file,
+            &output_file_name,
+            &state.user_settings.shell_script_wasmer_args,
+        )
+    }
+    .context("Failed to write to shell script")?;
+
+    file.flush().context("Failed to flush script file")?;
+    drop(file);
+
+    #[cfg(unix)]
+    {
+        let mut perms = std::fs::metadata(&script_path)
+            .context("Failed to stat script file")?
+            .permissions();
+        perms.set_mode(perms.mode() | 0o110);
+        std::fs::set_permissions(&output_file_name, perms)
+            .context("Failed to set executable permissions for script file")?;
+    }
+
+    Ok(())
 }
 
 fn prepare_compiler_args(
