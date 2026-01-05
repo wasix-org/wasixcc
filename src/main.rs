@@ -243,7 +243,7 @@ The following configuration options are available:");
   GENERATE_SHELL_SCRIPT=<BOOL>
                            Whether to generate shell scripts for running
                            the resulting binary like a normal native program.
-                           This setting applies to executables only.  This is
+                           This setting applies to executables only. This is
                            useful for running builds that don't have proper
                            support for cross-compilation. Such builds will
                            build a binary and assume they can run it
