@@ -1053,7 +1053,8 @@ fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
 mod tests {
     use super::*;
     use crate::UserSettings;
-    use std::{ffi::OsStr, path::PathBuf};
+    use std::{ffi::OsStr, fs, path::PathBuf};
+    use tempfile::TempDir;
 
     #[test]
     fn test_deduce_module_kind() {
@@ -1182,5 +1183,306 @@ mod tests {
 
         // Hopefully, you don't have a /yyy folder on your system...
         assert!(us.ensure_sysroot_location().is_err());
+    }
+
+    #[test]
+    fn test_output_path_without_shell_script() {
+        let us = UserSettings {
+            generate_shell_script: false,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("test_output")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let result = output_path(&state).unwrap();
+        assert_eq!(result, PathBuf::from("test_output"));
+    }
+
+    #[test]
+    fn test_output_path_with_shell_script_no_wasm_extension() {
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("myprogram")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let result = output_path(&state).unwrap();
+        assert_eq!(result, PathBuf::from("myprogram.wasm"));
+    }
+
+    #[test]
+    fn test_output_path_with_shell_script_existing_wasm_extension() {
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("myprogram.wasm")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let result = output_path(&state).unwrap();
+        assert_eq!(result, PathBuf::from("myprogram.wasm"));
+    }
+
+    #[test]
+    fn test_output_path_with_shell_script_default_output() {
+        let mut us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        us.module_kind = Some(ModuleKind::StaticMain);
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: None,
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let result = output_path(&state).unwrap();
+        assert_eq!(result, PathBuf::from("a.out.wasm"));
+    }
+
+    #[test]
+    fn test_shell_script_path_simple() {
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("myprogram")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let (script_path, output_file_name) = shell_script_path(&state).unwrap();
+        assert_eq!(script_path, PathBuf::from("myprogram"));
+        assert_eq!(output_file_name, OsString::from("myprogram.wasm"));
+    }
+
+    #[test]
+    fn test_shell_script_path_with_directory() {
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("/path/to/output")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let (script_path, output_file_name) = shell_script_path(&state).unwrap();
+        assert_eq!(script_path, PathBuf::from("/path/to/output"));
+        assert_eq!(output_file_name, OsString::from("output.wasm"));
+    }
+
+    #[test]
+    fn test_shell_script_path_with_wasm_extension() {
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(PathBuf::from("myprogram.wasm")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let (script_path, output_file_name) = shell_script_path(&state).unwrap();
+        assert_eq!(script_path, PathBuf::from("myprogram"));
+        assert_eq!(output_file_name, OsString::from("myprogram.wasm"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_default_args() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("testprog");
+
+        let us = UserSettings {
+            generate_shell_script: true,
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(output_path.clone()),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        generate_shell_script(&state).unwrap();
+
+        // Verify the script file was created
+        assert!(output_path.exists());
+
+        // Read and verify the script contents
+        let script_content = fs::read_to_string(&output_path).unwrap();
+        assert!(script_content.starts_with("#! /bin/sh"));
+        assert!(script_content.contains("SCRIPT_DIR=$(cd -- \"$(dirname -- \"$(realpath \"$0\" )\" )\" && pwd)"));
+        assert!(script_content.contains("wasmer run"));
+        assert!(script_content.contains("--forward-host-env"));
+        assert!(script_content.contains("--net"));
+        assert!(script_content.contains("--dir"));
+        assert!(script_content.contains("--cwd"));
+        assert!(script_content.contains("\"$SCRIPT_DIR/testprog.wasm\" -- \"$@\""));
+
+        #[cfg(unix)]
+        {
+            // Verify the script is executable
+            let metadata = fs::metadata(&output_path).unwrap();
+            let permissions = metadata.permissions();
+            assert!(permissions.mode() & 0o111 != 0, "Script should be executable");
+        }
+    }
+
+    #[test]
+    fn test_generate_shell_script_custom_args() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("testprog");
+
+        let us = UserSettings {
+            generate_shell_script: true,
+            shell_script_wasmer_args: vec![
+                "--custom-arg1".to_string(),
+                "--custom-arg2".to_string(),
+            ],
+            ..Default::default()
+        };
+        let state = State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: true,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                linker_args: Vec::new(),
+                compiler_inputs: Vec::new(),
+                linker_inputs: Vec::new(),
+                output: Some(output_path.clone()),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        generate_shell_script(&state).unwrap();
+
+        // Verify the script file was created
+        assert!(output_path.exists());
+
+        // Read and verify the script contents
+        let script_content = fs::read_to_string(&output_path).unwrap();
+        assert!(script_content.starts_with("#! /bin/sh"));
+        assert!(script_content.contains("wasmer run"));
+        assert!(script_content.contains("--custom-arg1"));
+        assert!(script_content.contains("--custom-arg2"));
+        assert!(script_content.contains("\"$SCRIPT_DIR/testprog.wasm\" -- \"$@\""));
+
+        // Should NOT contain default args
+        assert!(!script_content.contains("--forward-host-env"));
+        assert!(!script_content.contains("--net"));
     }
 }
