@@ -294,9 +294,7 @@ pub(crate) fn download_binaryen(
         .assets
         .iter()
         .find(|a| a.name.ends_with(&asset_suffix))
-        .with_context(|| {
-            "Could not find binaryen asset for the current platform in release".to_string()
-        })?;
+        .context("Could not find binaryen asset for the current platform in release")?;
 
     download_asset(asset, &target_dir, &client)
         .with_context(|| format!("Failed to download and unpack asset '{}'", asset.name))?;
