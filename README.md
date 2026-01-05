@@ -100,25 +100,30 @@ Run `wasixcc --help` for comprehensive usage instructions.
 
 Configuration can be set via command line (`-s` flag) or environment variables (`WASIXCC_` prefix):
 
-| Option                      | Description                                                          |
-| --------------------------- | -------------------------------------------------------------------- |
-| `SYSROOT`                   | Set the sysroot location                                             |
-| `SYSROOT_PREFIX`            | Set the sysroot prefix directory                                     |
-| `LLVM_LOCATION`             | Set location of LLVM binaries                                        |
-| `COMPILER_FLAGS`            | Extra compiler flags (colon-separated)                               |
-| `COMPILER_POST_FLAGS`       | Extra compiler flags (after command line args)                       |
-| `COMPILER_FLAGS_C`          | C-specific compiler flags                                            |
-| `COMPILER_POST_FLAGS_C`     | C-specific post compiler flags                                       |
-| `COMPILER_FLAGS_CXX`        | C++-specific compiler flags                                          |
-| `COMPILER_POST_FLAGS_CXX`   | C++-specific post compiler flags                                     |
-| `LINKER_FLAGS`              | Extra linker flags                                                   |
-| `RUN_WASM_OPT`              | Whether to run wasm-opt                                              |
-| `WASM_OPT_FLAGS`            | Extra wasm-opt flags                                                 |
-| `WASM_OPT_SUPPRESS_DEFAULT` | Suppress default wasm-opt flags                                      |
-| `MODULE_KIND`               | Module type (static-main, dynamic-main, shared-library, object-file) |
-| `WASM_EXCEPTIONS`           | Enable WASM exception handling                                       |
-| `PIC`                       | Enable position-independent code                                     |
-| `LINK_SYMBOLIC`             | Enable -Bsymbolic linking (enabled by default)                       |
+| Option                          | Description                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `SYSROOT`                       | Set the sysroot location                                                                       |
+| `SYSROOT_PREFIX`                | Set the sysroot prefix directory                                                               |
+| `LLVM_LOCATION`                 | Set location of LLVM binaries                                                                  |
+| `BINARYEN_LOCATION`             | Set location of wasm-opt                                                                       |
+| `COMPILER_FLAGS`                | Extra compiler flags (colon-separated)                                                         |
+| `COMPILER_POST_FLAGS`           | Extra compiler flags (after command line args)                                                 |
+| `COMPILER_FLAGS_C`              | C-specific compiler flags                                                                      |
+| `COMPILER_POST_FLAGS_C`         | C-specific post compiler flags                                                                 |
+| `COMPILER_FLAGS_CXX`            | C++-specific compiler flags                                                                    |
+| `COMPILER_POST_FLAGS_CXX`       | C++-specific post compiler flags                                                               |
+| `LINKER_FLAGS`                  | Extra linker flags                                                                             |
+| `INCLUDE_CPP_SYMBOLS`           | Whether to also link libc++, libc++abi and libunwind into C binaries                           |
+| `RUN_WASM_OPT`                  | Whether to run wasm-opt                                                                        |
+| `WASM_OPT_FLAGS`                | Extra wasm-opt flags                                                                           |
+| `WASM_OPT_SUPPRESS_DEFAULT`     | Suppress default wasm-opt flags                                                                |
+| `WASM_OPT_PRESERVE_UNOPTIMIZED` | Whether to preserve the unoptimized binary in a temp directory                                 |
+| `MODULE_KIND`                   | Module type (static-main, dynamic-main, shared-library, object-file)                           |
+| `WASM_EXCEPTIONS`               | Enable WASM exception handling                                                                 |
+| `PIC`                           | Enable position-independent code                                                               |
+| `LINK_SYMBOLIC`                 | Enable -Bsymbolic linking (enabled by default)                                                 |
+| `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
+| `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
 
 ### Environment Variables
 
@@ -153,9 +158,11 @@ directly, such as when running through CMake.
    wasixcc -sSYSROOT=/path/to/sysroot program.c -o program.wasm
    ```
 
-4. Compile with custom optimization flags:
+4. Compile with custom flags:
    ```bash
-   wasixcc -sCOMPILER_FLAGS="-O3" -sWASM_OPT_FLAGS="-O3" app.c -o app.wasm
+   export WASIXCC_COMPILER_FLAGS="-O3"
+   # ... a lot of other code ...
+   wasixcc app.c -o app.wasm
    ```
 
 ## Build configurations
