@@ -251,7 +251,7 @@ The following configuration options are available:");
                            extension to the output file name, and generate
                            a shell script with the original output name that,
                            once called, will run the wasm binary with wasmer
-                           and pass all arguments through to it. 
+                           and pass all arguments through to it.
   SHELL_SCRIPT_WASMER_ARGS=<FLAGS>
                            Additional arguments to be passed to wasmer in
                            the shell script. There will be a $SCRIPT_DIR
@@ -259,7 +259,7 @@ The following configuration options are available:");
                            directory. The default is to pass `--dir $SCRIPT_DIR
                            --cwd $SCRIPT_DIR --net --forward-host-env`. Specifying
                            a non-empty list will *override* the default
-                           rather than be appended to it.  Options must be
+                           rather than be appended to it. Options must be
                            separated with colons (':').
 
 Note: Pass-through options are passed directly to the underlying

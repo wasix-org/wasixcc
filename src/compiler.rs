@@ -668,19 +668,14 @@ fn generate_shell_script(state: &State) -> Result<()> {
         writeln!(file, "#! /bin/sh")?;
         writeln!(
             file,
-            r#"if [ -n "${{0%%/*}}" ]; then
-  SCRIPT_PATH=$(command -v "$0")
-else
-  SCRIPT_PATH=$0
-fi
-SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"#
+            r#"SCRIPT_DIR=$(cd -- "$(dirname -- "$(realpath $0)")" && pwd)"#
         )?;
         write!(file, "wasmer run ")?;
         for arg in wasmer_args {
             write!(file, r#""{}" "#, arg.as_ref())?;
         }
         // TODO: this fails for non-UTF8 paths
-        write!(
+        writeln!(
             file,
             r#""$SCRIPT_DIR/{}" -- $@"#,
             output_file_name.display()
@@ -731,7 +726,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"#
             .context("Failed to stat script file")?
             .permissions();
         perms.set_mode(perms.mode() | 0o110);
-        std::fs::set_permissions(&output_file_name, perms)
+        std::fs::set_permissions(&script_path, perms)
             .context("Failed to set executable permissions for script file")?;
     }
 
