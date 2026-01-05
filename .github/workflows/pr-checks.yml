@@ -16,7 +16,7 @@ jobs:
       
       - name: Install Rust via rustup
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal --component rustfmt
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal --component rustfmt
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Check formatting
@@ -30,7 +30,7 @@ jobs:
       
       - name: Install Rust via rustup
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Run tests
@@ -89,7 +89,7 @@ jobs:
       
       - name: Install Rust via rustup
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88 --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       
       - name: Build wasixcc

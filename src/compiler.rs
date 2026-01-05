@@ -641,10 +641,10 @@ fn prepare_compiler_args(
                 bail!("Expected argument after -o");
             };
             let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none() {
-                if let Some(module_kind) = output.extension().and_then(deduce_module_kind) {
-                    user_settings.module_kind = Some(module_kind);
-                }
+            if user_settings.module_kind.is_none()
+                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
+            {
+                user_settings.module_kind = Some(module_kind);
             }
             result.output = Some(output);
         } else if arg.starts_with('-') {
@@ -799,19 +799,17 @@ fn prepare_linker_args(
                 bail!("Expected argument after -o");
             };
             let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none() {
-                if let Some(module_kind) = output.extension().and_then(deduce_module_kind) {
-                    user_settings.module_kind = Some(module_kind);
-                }
+            if user_settings.module_kind.is_none()
+                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
+            {
+                user_settings.module_kind = Some(module_kind);
             }
             result.output = Some(output);
         } else if arg.starts_with('-') {
             let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
             result.linker_args.push(arg);
-            if has_next_arg {
-                if let Some(next_arg) = next_arg.take() {
-                    result.linker_args.push(next_arg);
-                }
+            if has_next_arg && let Some(next_arg) = next_arg.take() {
+                result.linker_args.push(next_arg);
             }
         } else {
             // Assume it's an input file
