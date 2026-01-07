@@ -3,7 +3,9 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -13,43 +15,75 @@ jobs:
   verify-version:
     name: Verify Version Consistency
     runs-on: ubuntu-latest
+    # Run on tag pushes, OR PRs where the source branch is release/*
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
     outputs:
       version: ${{ steps.extract.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract version from tag
+      - name: Extract version from tag or branch
         id: extract
         run: |
-          # Get the tag name from the ref
-          # For workflow_dispatch, GITHUB_REF should still contain a tag if pushed to a tag
-          if [ -z "$GITHUB_REF" ]; then
-            echo "ERROR: GITHUB_REF is empty"
+          if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
+            # --- Pull Request Logic ---
+            # Get version from the source branch name (e.g., release/0.2.5)
+            if [ -z "$GITHUB_HEAD_REF" ]; then
+              echo "ERROR: GITHUB_HEAD_REF is empty"
+              exit 1
+            fi
+
+            BRANCH="${GITHUB_HEAD_REF}"
+            
+            # Ensure branch matches release/*
+            if [[ ! "$BRANCH" =~ ^release/ ]]; then
+              echo "ERROR: Branch name must match 'release/*' (e.g., release/0.2.5)"
+              exit 1
+            fi
+
+            # Extract version by removing 'release/' prefix
+            VERSION="${BRANCH#release/}"
+            echo "Extracted version from PR branch: $VERSION"
+
+          else
+            # --- Tag Logic ---
+            # Get the tag name from the ref
+            if [ -z "$GITHUB_REF" ]; then
+              echo "ERROR: GITHUB_REF is empty"
+              exit 1
+            fi
+
+            # Check if this is a tag reference
+            if [[ ! "$GITHUB_REF" =~ refs/tags/ ]]; then
+              echo "ERROR: This workflow must be triggered by a tag push (refs/tags/v*)"
+              echo "Current GITHUB_REF: $GITHUB_REF"
+              exit 1
+            fi
+
+            TAG="${GITHUB_REF#refs/tags/}"
+            
+            # Verify tag starts with 'v' and follows semantic versioning
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "ERROR: Tag must be in the format 'vX.Y.Z' (e.g., v0.2.5)"
+              echo "Current tag: $TAG"
+              exit 1
+            fi
+
+            # Remove 'v' prefix to get version
+            VERSION="${TAG#v}"
+            echo "Extracted version from tag: $VERSION"
+          fi
+
+          # --- Common Validation ---
+          # Ensure the extracted version is valid semantic versioning (X.Y.Z)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Extracted version '$VERSION' is not valid (format X.Y.Z)"
             exit 1
           fi
 
-          # Check if this is a tag reference
-          if [[ ! "$GITHUB_REF" =~ refs/tags/ ]]; then
-            echo "ERROR: This workflow must be triggered by a tag push (refs/tags/v*)"
-            echo "Current GITHUB_REF: $GITHUB_REF"
-            echo "Manual workflow_dispatch should be triggered from a tag, not a branch"
-            exit 1
-          fi
-
-          TAG="${GITHUB_REF#refs/tags/}"
-          echo "Tag: $TAG"
-
-          # Verify tag starts with 'v' and follows semantic versioning
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-            echo "ERROR: Tag must be in the format 'vX.Y.Z' (e.g., v0.2.5)"
-            echo "Current tag: $TAG"
-            exit 1
-          fi
-
-          # Remove 'v' prefix to get version
-          VERSION="${TAG#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
 
       - name: Verify Cargo.toml version
         run: |
@@ -58,7 +92,7 @@ jobs:
           echo "Cargo.toml version: $CARGO_VERSION"
 
           if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "ERROR: Cargo.toml version ($CARGO_VERSION) does not match tag version ($VERSION)"
+            echo "ERROR: Cargo.toml version ($CARGO_VERSION) does not match extracted version ($VERSION)"
             exit 1
           fi
           echo "✓ Cargo.toml version matches"
@@ -70,7 +104,7 @@ jobs:
           echo "wasmer.toml version: $WASMER_VERSION"
 
           if [ "$WASMER_VERSION" != "$VERSION" ]; then
-            echo "ERROR: wasmer.toml version ($WASMER_VERSION) does not match tag version ($VERSION)"
+            echo "ERROR: wasmer.toml version ($WASMER_VERSION) does not match extracted version ($VERSION)"
             exit 1
           fi
           echo "✓ wasmer.toml version matches"
@@ -82,7 +116,7 @@ jobs:
           echo "install.sh version: $INSTALL_VERSION"
 
           if [ "$INSTALL_VERSION" != "$VERSION" ]; then
-            echo "ERROR: install.sh version ($INSTALL_VERSION) does not match tag version ($VERSION)"
+            echo "ERROR: install.sh version ($INSTALL_VERSION) does not match extracted version ($VERSION)"
             exit 1
           fi
           echo "✓ install.sh version matches"
@@ -95,6 +129,8 @@ jobs:
     needs: verify-version
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    # Do NOT run on Pull Requests
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -165,6 +201,8 @@ jobs:
     name: Publish to crates.io
     needs: [verify-version, build]
     runs-on: ubuntu-latest
+    # Do NOT run on Pull Requests
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -182,6 +220,8 @@ jobs:
     name: Create Release
     needs: [build, publish-crates-io]
     runs-on: ubuntu-latest
+    # Do NOT run on Pull Requests
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
