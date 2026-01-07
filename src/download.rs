@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs, path::Path, str::FromStr};
+use std::{fmt::Display, fs, path::Path, str::FromStr, sync::OnceLock};
 
 use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
@@ -11,9 +11,9 @@ const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
 const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 
 /// Creates a TLS configuration using system certificates with fallback to bundled certs.
+static CRYPTO_PROVIDER_LOCK: OnceLock<()> = OnceLock::new();
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
-    // Install the crypto provider. If it fails, it means one is already installed, which is fine.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    CRYPTO_PROVIDER_LOCK.get_or_init(|| rustls::crypto::ring::default_provider().install_default().unwrap());
 
     let mut root_store = rustls::RootCertStore::empty();
     let cert_result = rustls_native_certs::load_native_certs();
