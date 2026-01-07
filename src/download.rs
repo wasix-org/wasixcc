@@ -13,6 +13,10 @@ const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 /// Creates a TLS configuration that tries to use system certificates first,
 /// and falls back to bundled certificates if system certs cannot be loaded.
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
+    // Ensure a crypto provider is installed. This is safe to call multiple times.
+    // The ring provider is available through reqwest's rustls-tls feature.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    
     let mut root_store = rustls::RootCertStore::empty();
     
     // Try to load system certificates first
@@ -498,9 +502,6 @@ mod tests {
 
     #[test]
     fn test_create_tls_config() {
-        // Install the default crypto provider for testing
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        
         // Test that we can create a TLS configuration
         let result = create_tls_config();
         assert!(result.is_ok(), "Should successfully create TLS config");
