@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs, path::Path, str::FromStr};
+use std::{fmt::Display, fs, path::Path, str::FromStr, sync::Once};
 
 use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
@@ -10,12 +10,20 @@ const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
 const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 
+/// Ensures the crypto provider is installed exactly once
+static INIT_CRYPTO_PROVIDER: Once = Once::new();
+
+fn ensure_crypto_provider() {
+    INIT_CRYPTO_PROVIDER.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 /// Creates a TLS configuration that tries to use system certificates first,
 /// and falls back to bundled certificates if system certs cannot be loaded.
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
-    // Ensure a crypto provider is installed. This is safe to call multiple times.
-    // The ring provider is available through reqwest's rustls-tls feature.
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Ensure a crypto provider is installed exactly once
+    ensure_crypto_provider();
     
     let mut root_store = rustls::RootCertStore::empty();
     
