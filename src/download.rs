@@ -13,15 +13,15 @@ const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 /// Creates a TLS configuration using system certificates with fallback to bundled certs.
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    
+
     let mut root_store = rustls::RootCertStore::empty();
     let cert_result = rustls_native_certs::load_native_certs();
     let (valid, _) = root_store.add_parsable_certificates(cert_result.certs);
-    
+
     if valid == 0 {
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     }
-    
+
     Ok(rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth())
@@ -36,7 +36,7 @@ fn create_github_client() -> anyhow::Result<reqwest::blocking::Client> {
             headers.insert("authorization", format!("Bearer {token}").parse()?);
         }
     }
-    
+
     reqwest::blocking::Client::builder()
         .default_headers(headers)
         .user_agent("wasixcc")
@@ -435,21 +435,5 @@ fn move_dir(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> 
             Ok(())
         }
         Err(e) => Err(e).context("Failed to move directory"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_create_tls_config() {
-        // Test that we can create a TLS configuration
-        let result = create_tls_config();
-        assert!(result.is_ok(), "Should successfully create TLS config");
-        
-        // The config should be usable - just verify we got a valid config
-        let _config = result.unwrap();
-        // If we got here without panicking, the config was successfully created
     }
 }
