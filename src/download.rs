@@ -13,7 +13,11 @@ const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 /// Creates a TLS configuration using system certificates with fallback to bundled certs.
 static CRYPTO_PROVIDER_LOCK: OnceLock<()> = OnceLock::new();
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
-    CRYPTO_PROVIDER_LOCK.get_or_init(|| rustls::crypto::ring::default_provider().install_default().unwrap());
+    CRYPTO_PROVIDER_LOCK.get_or_init(|| {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .unwrap()
+    });
 
     let mut root_store = rustls::RootCertStore::empty();
     let cert_result = rustls_native_certs::load_native_certs();
