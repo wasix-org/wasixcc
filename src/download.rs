@@ -10,6 +10,38 @@ const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
 const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 
+/// Creates a TLS configuration that tries to use system certificates first,
+/// and falls back to bundled certificates if system certs cannot be loaded.
+fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
+    let mut root_store = rustls::RootCertStore::empty();
+    
+    // Try to load system certificates first
+    let cert_result = rustls_native_certs::load_native_certs();
+    
+    // Log any errors that occurred while loading system certificates
+    for err in &cert_result.errors {
+        tracing::warn!("Error loading system certificate: {}", err);
+    }
+    
+    // Add the loaded certificates to the root store
+    let (valid, invalid) = root_store.add_parsable_certificates(cert_result.certs);
+    
+    if valid > 0 {
+        tracing::debug!("Loaded {} valid system certificates", valid);
+        if invalid > 0 {
+            tracing::debug!("Skipped {} invalid system certificates", invalid);
+        }
+    } else {
+        // No valid system certs, fall back to bundled certs
+        tracing::warn!("No valid system certificates found, falling back to bundled certificates");
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    }
+    
+    Ok(rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth())
+}
+
 #[derive(serde::Deserialize)]
 struct GithubReleaseData {
     assets: Vec<GithubAsset>,
@@ -107,9 +139,11 @@ pub(crate) fn download_sysroot(
         headers.insert("authorization", format!("Bearer {token}").parse()?);
     }
 
+    let tls_config = create_tls_config()?;
     let client = reqwest::blocking::Client::builder()
         .default_headers(headers)
         .user_agent("wasixcc")
+        .use_preconfigured_tls(tls_config)
         .build()?;
 
     let release_url = format!(
@@ -178,9 +212,11 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> 
         headers.insert("authorization", format!("Bearer {token}").parse()?);
     }
 
+    let tls_config = create_tls_config()?;
     let client = reqwest::blocking::Client::builder()
         .default_headers(headers)
         .user_agent("wasixcc")
+        .use_preconfigured_tls(tls_config)
         .build()?;
 
     let release_url = format!(
@@ -268,9 +304,11 @@ pub(crate) fn download_binaryen(
         headers.insert("authorization", format!("Bearer {token}").parse()?);
     }
 
+    let tls_config = create_tls_config()?;
     let client = reqwest::blocking::Client::builder()
         .default_headers(headers)
         .user_agent("wasixcc")
+        .use_preconfigured_tls(tls_config)
         .build()?;
 
     let release_url = format!(
