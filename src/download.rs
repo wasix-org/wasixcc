@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs, path::Path, str::FromStr};
+use std::{fmt::Display, fs, path::Path, str::FromStr, sync::OnceLock};
 
 use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
@@ -9,6 +9,46 @@ use crate::UserSettings;
 const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
 const BINARYEN_REPO: &str = "WebAssembly/binaryen";
+
+/// Creates a TLS configuration using system certificates with fallback to bundled certs.
+static CRYPTO_PROVIDER_LOCK: OnceLock<()> = OnceLock::new();
+fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
+    CRYPTO_PROVIDER_LOCK.get_or_init(|| {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .unwrap()
+    });
+
+    let mut root_store = rustls::RootCertStore::empty();
+    let cert_result = rustls_native_certs::load_native_certs();
+    let (valid, _) = root_store.add_parsable_certificates(cert_result.certs);
+
+    if valid == 0 {
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    }
+
+    Ok(rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth())
+}
+
+/// Creates an HTTP client with GitHub API headers and custom TLS configuration.
+fn create_github_client() -> anyhow::Result<reqwest::blocking::Client> {
+    let mut headers = HeaderMap::new();
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            headers.insert("authorization", format!("Bearer {token}").parse()?);
+        }
+    }
+
+    reqwest::blocking::Client::builder()
+        .default_headers(headers)
+        .user_agent("wasixcc")
+        .use_preconfigured_tls(create_tls_config()?)
+        .build()
+        .context("Failed to create HTTP client")
+}
 
 #[derive(serde::Deserialize)]
 struct GithubReleaseData {
@@ -94,24 +134,7 @@ pub(crate) fn download_sysroot(
         tracing::warn!("SYSROOT_LOCATION is ignored when downloading sysroot");
     }
 
-    let mut headers = HeaderMap::new();
-
-    // Use API token if specified via env var.
-    // Prevents 403 errors when IP is throttled by Github API.
-    let gh_token = std::env::var("GITHUB_TOKEN")
-        .ok()
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty());
-
-    if let Some(token) = gh_token {
-        headers.insert("authorization", format!("Bearer {token}").parse()?);
-    }
-
-    let client = reqwest::blocking::Client::builder()
-        .default_headers(headers)
-        .user_agent("wasixcc")
-        .build()?;
-
+    let client = create_github_client()?;
     let release_url = format!(
         "https://api.github.com/repos/{SYSROOT_REPO}/releases/{}",
         tag_spec.display_github_url_postfix()
@@ -165,24 +188,7 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> 
     }
     let target_dir = target_dir.to_path_buf();
 
-    let mut headers = HeaderMap::new();
-
-    // Use API token if specified via env var.
-    // Prevents 403 errors when IP is throttled by Github API.
-    let gh_token = std::env::var("GITHUB_TOKEN")
-        .ok()
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty());
-
-    if let Some(token) = gh_token {
-        headers.insert("authorization", format!("Bearer {token}").parse()?);
-    }
-
-    let client = reqwest::blocking::Client::builder()
-        .default_headers(headers)
-        .user_agent("wasixcc")
-        .build()?;
-
+    let client = create_github_client()?;
     let release_url = format!(
         "https://api.github.com/repos/{LLVM_REPO}/releases/{}",
         tag_spec.display_github_url_postfix()
@@ -255,24 +261,7 @@ pub(crate) fn download_binaryen(
     }
     let target_dir = target_dir.to_path_buf();
 
-    let mut headers = HeaderMap::new();
-
-    // Use API token if specified via env var.
-    // Prevents 403 errors when IP is throttled by Github API.
-    let gh_token = std::env::var("GITHUB_TOKEN")
-        .ok()
-        .map(|x| x.trim().to_string())
-        .filter(|x| !x.is_empty());
-
-    if let Some(token) = gh_token {
-        headers.insert("authorization", format!("Bearer {token}").parse()?);
-    }
-
-    let client = reqwest::blocking::Client::builder()
-        .default_headers(headers)
-        .user_agent("wasixcc")
-        .build()?;
-
+    let client = create_github_client()?;
     let release_url = format!(
         "https://api.github.com/repos/{BINARYEN_REPO}/releases/{}",
         tag_spec.display_github_url_postfix()
