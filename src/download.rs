@@ -13,7 +13,6 @@ const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 /// Creates a TLS configuration using system certificates with fallback to bundled certs.
 fn create_tls_config() -> anyhow::Result<rustls::ClientConfig> {
     // Install the crypto provider. If it fails, it means one is already installed, which is fine.
-    // The error type is Arc<CryptoProvider> representing the already-installed provider.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let mut root_store = rustls::RootCertStore::empty();
