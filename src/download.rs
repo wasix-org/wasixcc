@@ -491,3 +491,22 @@ fn move_dir(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> 
         Err(e) => Err(e).context("Failed to move directory"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_tls_config() {
+        // Install the default crypto provider for testing
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        
+        // Test that we can create a TLS configuration
+        let result = create_tls_config();
+        assert!(result.is_ok(), "Should successfully create TLS config");
+        
+        // The config should be usable - just verify we got a valid config
+        let _config = result.unwrap();
+        // If we got here without panicking, the config was successfully created
+    }
+}
