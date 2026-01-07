@@ -15,7 +15,10 @@ static INIT_CRYPTO_PROVIDER: Once = Once::new();
 
 fn ensure_crypto_provider() {
     INIT_CRYPTO_PROVIDER.call_once(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        if let Err(err) = rustls::crypto::ring::default_provider().install_default() {
+            // This is not necessarily fatal - another provider might already be installed
+            tracing::debug!("Could not install default crypto provider: {:?}", err);
+        }
     });
 }
 
