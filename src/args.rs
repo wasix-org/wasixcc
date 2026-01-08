@@ -29,7 +29,7 @@ impl LlvmLocation {
                         default_path = ?path.display(),
                         "No LLVM location specified and no LLVM installation found in \
                         default path. Using system LLVM version 21. Output may be broken.\
-                        Use `wasixcc --download-llvm` to download a compatible version."
+                        Use `wasixccenv download-llvm` to download a compatible version."
                     );
                     let tool_path = format!("{}-{}", tool, 21);
                     PathBuf::from(tool_path)
@@ -69,7 +69,7 @@ impl BinaryenLocation {
                         default_path = ?path.display(),
                         "No binaryen location specified and no binaryen installation found in \
                         default path. Using system binaryen. Output may be broken.\
-                        Use `wasixcc --download-binaryen` to download a compatible version."
+                        Use `wasixccenv download-binaryen` to download a compatible version."
                     );
                     PathBuf::from(tool)
                 }

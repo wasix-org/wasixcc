@@ -98,7 +98,7 @@ jobs:
       - name: Download toolchain and sysroot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./target/release/wasixcc --download-all
+        run: ./target/release/wasixccenv download-all
 
       - name: Test compilation
         run: |
