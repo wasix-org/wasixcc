@@ -84,7 +84,7 @@ enum WasixccCommand {
         binaryen_tag: Option<TagSpec>,
         /// The path where the wasixcc executables will be installed
         path: PathBuf,
-    }
+    },
     /// Print the sysroot location according to current configuration
     PrintSysroot,
     /// Print help information about wasixcc configuration options
