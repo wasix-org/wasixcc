@@ -3,15 +3,20 @@ name: Test GitHub Action
 on:
   pull_request:
     paths:
-      - "action.yml"
-      - ".github/workflows/test-action.yml"
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  build-release-bundle:
+    name: Build executables
+    uses: ./.github/workflows/build-release-bundle.yml
+
   test-action:
+    needs: build-release-bundle
     name: Test Action on ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -39,6 +44,19 @@ jobs:
         if: contains(matrix.name, 'alpine')
         run: apk add --no-cache git
 
+      - name: Try to download bundle
+        continue-on-error: true
+        run: |
+          echo ${{ needs.build-release-bundle.outputs.artifact-url }}
+          echo ${{ needs.build-release-bundle.outputs.artifact-id }}
+          curl -L -o wasixcc-release.tar.gz "${{ needs.build-release-bundle.outputs.artifact-url }}"
+          tar xzf wasixcc-release.tar.gz
+
+      - name: Setup upterm session
+        uses: owenthereal/action-upterm@v1
+        with:
+          limit-access-to-users: zebreus
+
       - name: Clone repository
         run: |
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
@@ -57,7 +75,7 @@ jobs:
           wasix++ --version || echo "wasix++ not found"
 
           echo "Checking sysroot..."
-          wasixccenv print-sysroot
+          wasixcc --print-sysroot
 
           echo "Verifying wasm-opt is in PATH and from wasixcc installation..."
           if command -v wasm-opt >/dev/null 2>&1; then
