@@ -50,7 +50,7 @@ enum WasixccCommand {
     },
     /// Download binaryen (Unix only)
     DownloadBinaryen {
-        /// The tag from which to download the LLVM toolchain, either 'latest' or a
+        /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         tag: Option<TagSpec>,
     },
