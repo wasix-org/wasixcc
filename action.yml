@@ -188,7 +188,7 @@ runs:
 
         # Install executables (wasix++, wasixar, etc.) to bin directory
         mkdir -p "$WASIXCC_HOME/bin"
-        "$WASIXCC_HOME/wasixccenv" --install-executables "$WASIXCC_HOME/bin"
+        "$WASIXCC_HOME/wasixccenv" install-executables "$WASIXCC_HOME/bin"
         echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
 
     - name: Install binaryen
