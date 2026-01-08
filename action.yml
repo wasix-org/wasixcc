@@ -56,6 +56,11 @@ inputs:
     description: "Whether to add LLVM toolchain (clang, llvm-ar, etc.) to PATH (true/false)"
     required: false
     default: "false"
+  
+  release-base-url:
+    description: "Base url for wasixcc release tarballs (overrides version input)"
+    required: false
+    default: "https://github.com/wasix-org/wasixcc/releases/download"
 
 outputs:
   wasixcc-path:
@@ -160,7 +165,7 @@ runs:
       run: |
         VERSION="${{ steps.resolve-version.outputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
-        DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
+        DOWNLOAD_URL="${{ inputs.release-base-url }}/${VERSION}/wasixcc-${TARGET}.tar.gz"
 
         if [ -n "$GITHUB_TOKEN" ]; then
           curl -L -H "authorization: Bearer $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"

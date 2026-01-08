@@ -3,9 +3,6 @@ name: Release
 on:
   workflow_call:
     outputs:
-      artifact-url:
-        description: 'Url of the release tarball artifact'
-        value: ${{ jobs.aggregate-artifacts.outputs.artifact-url }}
       artifact-id:
         description: 'ID of the release tarball artifact'
         value: ${{ jobs.aggregate-artifacts.outputs.artifact-id }}
@@ -73,7 +70,7 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf wasixcc-${{ matrix.target }}.tar.gz wasixcc*
+          tar czf wasixcc-${{ matrix.target }}.tar.gz wasixccenv
           mv wasixcc-${{ matrix.target }}.tar.gz ../../../
 
       - name: Upload artifact
@@ -88,7 +85,6 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      artifact-url: ${{ steps.upload-artifact.outputs.artifact-url }}
       artifact-id: ${{ steps.upload-artifact.outputs.artifact-id }}
 
     steps:
@@ -96,14 +92,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
-      - name: Create release tarball
+      - name: Create release bundle
         run: |
-          mkdir release-tarball
-          mv ./artifacts/*/*.tar.gz ./release-tarball/
-          tar -czf wasixcc-release-bundle.tar.gz -C release-tarball .
-      - name: Upload release tarball
+          mkdir release-bundle
+          mv ./artifacts/*/*.tar.gz ./release-bundle/
+          tar -czf release-bundle.tar.gz -C release-bundle .
+      - name: Upload release bundle
         id: upload-artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wasixcc-release-bundle
-          path: wasixcc-release-bundle.tar.gz
+          name: release-bundle
+          path: release-bundle.tar.gz
