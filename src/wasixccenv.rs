@@ -68,9 +68,23 @@ enum WasixccCommand {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
+    },
+    AioInstall {
+        #[arg(long)]
+        /// The tag from which to download the sysroot, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        sysroot_tag: Option<TagSpec>,
+        #[arg(long)]
+        /// The tag from which to download the LLVM toolchain, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        llvm_tag: Option<TagSpec>,
+        #[arg(long)]
+        /// The tag from which to download binaryen, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        binaryen_tag: Option<TagSpec>,
         /// The path where the wasixcc executables will be installed
         path: PathBuf,
-    },
+    }
     /// Print the sysroot location according to current configuration
     PrintSysroot,
     /// Print help information about wasixcc configuration options
@@ -94,6 +108,16 @@ pub(crate) fn run() -> Result<()> {
             download_binaryen(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
         WasixccCommand::DownloadAll {
+            binaryen_tag,
+            llvm_tag,
+            sysroot_tag,
+        } => {
+            download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            Ok(())
+        }
+        WasixccCommand::AioInstall {
             binaryen_tag,
             llvm_tag,
             sysroot_tag,
