@@ -3,8 +3,8 @@ name: Test GitHub Action
 on:
   pull_request:
     paths:
-      - 'action.yml'
-      - '.github/workflows/test-action.yml'
+      - "action.yml"
+      - ".github/workflows/test-action.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,32 +33,32 @@ jobs:
             runner: ubuntu-24.04-arm
             container: alpine:3.23
     container: ${{ matrix.container }}
-    
+
     steps:
       - name: Install git (Alpine only)
         if: contains(matrix.name, 'alpine')
         run: apk add --no-cache git
-      
+
       - name: Clone repository
         run: |
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
-      
+
       - name: Setup wasixcc with all components
         uses: ./
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Verify wasixcc installation
         run: |
           echo "Testing wasixcc..."
           wasixcc --version
-          
+
           echo "Testing wasix++..."
           wasix++ --version || echo "wasix++ not found"
-          
+
           echo "Checking sysroot..."
-          wasixcc --print-sysroot
-          
+          wasixccenv print-sysroot
+
           echo "Verifying wasm-opt is in PATH and from wasixcc installation..."
           if command -v wasm-opt >/dev/null 2>&1; then
             WASM_OPT_PATH=$(command -v wasm-opt)
@@ -74,7 +74,7 @@ jobs:
             echo "✗ wasm-opt NOT found in PATH (expected to be available from wasixcc)"
             exit 1
           fi
-          
+
           echo "Verifying clang is NOT in PATH from wasixcc installation..."
           if command -v clang >/dev/null 2>&1; then
             CLANG_PATH=$(command -v clang)
@@ -88,7 +88,7 @@ jobs:
           else
             echo "✓ clang correctly NOT in PATH"
           fi
-      
+
       - name: Create and compile C program
         run: |
           cat > hello.c << 'EOF'
@@ -100,7 +100,7 @@ jobs:
           EOF
           wasixcc hello.c -o hello.wasm
           ls -lh hello.wasm
-      
+
       - name: Create and compile C++ program
         run: |
           cat > hello.cpp << 'EOF'
@@ -112,4 +112,3 @@ jobs:
           EOF
           wasix++ hello.cpp -o hello_cpp.wasm
           ls -lh hello_cpp.wasm
-
