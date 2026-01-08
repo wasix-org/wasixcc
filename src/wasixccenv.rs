@@ -193,7 +193,7 @@ fn symlink_executable(exe_path: &Path, target: &Path) -> Result<()> {
     use std::{fs, os::unix::fs as unix_fs};
 
     unix_fs::symlink(exe_path, target)
-        .with_context(|| format!("Failed create symlink at {target:?}"))?;
+        .with_context(|| format!("Failed to create symlink at {target:?}"))?;
     let permissions = unix_fs::PermissionsExt::from_mode(0o755);
     fs::set_permissions(&target, permissions)
         .with_context(|| format!("Failed to set permissions for {target:?}"))?;
