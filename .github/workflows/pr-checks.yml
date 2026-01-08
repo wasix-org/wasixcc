@@ -2,7 +2,7 @@ name: PR Checks
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust via rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal --component rustfmt
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -27,12 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust via rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      
+
       - name: Run tests
         run: cargo test
 
@@ -43,7 +43,7 @@ jobs:
       should_run: ${{ steps.filter.outputs.should_run }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -73,12 +73,12 @@ jobs:
           - platform: alpine-linux
             os: ubuntu-latest
             container: alpine:latest
-    
+
     container: ${{ matrix.container }}
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Alpine dependencies
         if: matrix.container == 'alpine:latest'
         run: |
@@ -86,33 +86,33 @@ jobs:
             curl \
             gcc \
             musl-dev
-      
+
       - name: Install Rust via rustup
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-      
+
       - name: Build wasixcc
-        run: cargo build -r --features bin --bin wasixcc
-      
+        run: cargo build -r
+
       - name: Download toolchain and sysroot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./target/release/wasixcc --download-all
-      
+
       - name: Test compilation
         run: |
           cat > test_main.c << 'EOF'
           #include <stdio.h>
-          
+
           int main() {
               printf("Hello from WASIX!\n");
               return 0;
           }
           EOF
-          
+
           ./target/release/wasixcc test_main.c -o test_main.wasm
-          
+
           if [ ! -f test_main.wasm ]; then
             echo "Error: test_main.wasm was not created"
             exit 1

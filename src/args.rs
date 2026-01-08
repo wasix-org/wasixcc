@@ -1,22 +1,13 @@
 #![cfg_attr(target_vendor = "wasmer", allow(unexpected_cfgs))]
 
-use std::{
-    collections::{HashMap, HashSet},
-    ffi::{OsStr, OsString},
-    path::{Path, PathBuf},
-    process::Command,
-    sync::LazyLock,
-};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use crate::{compiler::ModuleKind, download::TagSpec};
-
-mod compiler;
-pub mod download;
+use crate::compiler::ModuleKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum LlvmLocation {
+pub enum LlvmLocation {
     UserProvided(PathBuf),
     DefaultPath(PathBuf),
 }
@@ -56,7 +47,7 @@ impl Default for LlvmLocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum BinaryenLocation {
+pub enum BinaryenLocation {
     UserProvided(PathBuf),
     DefaultPath(PathBuf),
 }
@@ -85,20 +76,6 @@ impl BinaryenLocation {
             }
         }
     }
-    pub fn get_bin_path(&self) -> Option<PathBuf> {
-        match self {
-            Self::UserProvided(path) => Some(path.join("bin")),
-            Self::DefaultPath(path) => {
-                if path.join("bin").exists() {
-                    Some(path.join("bin"))
-                } else {
-                    // Default to running system binaryen if the custom toolchain is not
-                    // installed.
-                    None
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -112,29 +89,29 @@ impl Default for BinaryenLocation {
 /// compiler flags; e.g. `-fno-wasm-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Default))]
-struct UserSettings {
-    sysroot_location: Option<PathBuf>,          // key name: SYSROOT
-    sysroot_prefix: PathBuf,                    // key name: SYSROOT_PREFIX
-    llvm_location: LlvmLocation,                // key name: LLVM_LOCATION
-    binaryen_location: BinaryenLocation,        // key name: BINARYEN_LOCATION
-    extra_compiler_flags: Vec<String>,          // key name: COMPILER_FLAGS
-    extra_compiler_post_flags: Vec<String>,     // key name: COMPILER_POST_FLAGS
-    extra_compiler_flags_c: Vec<String>,        // key name: COMPILER_FLAGS_C
-    extra_compiler_post_flags_c: Vec<String>,   // key name: COMPILER_POST_FLAGS_C
-    extra_compiler_flags_cxx: Vec<String>,      // key name: COMPILER_FLAGS_CXX
-    extra_compiler_post_flags_cxx: Vec<String>, // key name: COMPILER_POST_FLAGS_CXX
-    extra_linker_flags: Vec<String>,            // key name: LINKER_FLAGS
-    include_cpp_symbols: bool,                  // key name: INCLUDE_CPP_SYMBOLS
-    run_wasm_opt: Option<bool>,                 // key name: RUN_WASM_OPT
-    wasm_opt_flags: Vec<String>,                // key name: WASM_OPT_FLAGS
-    wasm_opt_suppress_default: bool,            // key name: WASM_OPT_SUPPRESS_DEFAULT
-    wasm_opt_preserve_unoptimized: bool,        // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
-    module_kind: Option<ModuleKind>,            // key name: MODULE_KIND
-    wasm_exceptions: bool,                      // key name: WASM_EXCEPTIONS
-    pic: bool,                                  // key name: PIC
-    link_symbolic: bool,                        // key name: LINK_SYMBOLIC
-    generate_shell_script: bool,                // key name: GENERATE_SHELL_SCRIPT
-    shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
+pub struct UserSettings {
+    pub sysroot_location: Option<PathBuf>,      // key name: SYSROOT
+    pub sysroot_prefix: PathBuf,                // key name: SYSROOT_PREFIX
+    pub llvm_location: LlvmLocation,            // key name: LLVM_LOCATION
+    pub binaryen_location: BinaryenLocation,    // key name: BINARYEN_LOCATION
+    pub extra_compiler_flags: Vec<String>,      // key name: COMPILER_FLAGS
+    pub extra_compiler_post_flags: Vec<String>, // key name: COMPILER_POST_FLAGS
+    pub extra_compiler_flags_c: Vec<String>,    // key name: COMPILER_FLAGS_C
+    pub extra_compiler_post_flags_c: Vec<String>, // key name: COMPILER_POST_FLAGS_C
+    pub extra_compiler_flags_cxx: Vec<String>,  // key name: COMPILER_FLAGS_CXX
+    pub extra_compiler_post_flags_cxx: Vec<String>, // key name: COMPILER_POST_FLAGS_CXX
+    pub extra_linker_flags: Vec<String>,        // key name: LINKER_FLAGS
+    pub include_cpp_symbols: bool,              // key name: INCLUDE_CPP_SYMBOLS
+    pub run_wasm_opt: Option<bool>,             // key name: RUN_WASM_OPT
+    pub wasm_opt_flags: Vec<String>,            // key name: WASM_OPT_FLAGS
+    pub wasm_opt_suppress_default: bool,        // key name: WASM_OPT_SUPPRESS_DEFAULT
+    pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
+    pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
+    pub wasm_exceptions: bool,                  // key name: WASM_EXCEPTIONS
+    pub pic: bool,                              // key name: PIC
+    pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
+    pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
+    pub shell_script_wasmer_args: Vec<String>,  // key name: SHELL_SCRIPT_WASMER_ARGS
 }
 
 impl UserSettings {
@@ -170,110 +147,20 @@ impl UserSettings {
     }
 }
 
-fn get_args_and_user_settings() -> Result<(Vec<String>, UserSettings)> {
+pub fn get_args_and_user_settings() -> Result<(Vec<String>, UserSettings)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (settings_args, args) = separate_user_settings_args(args);
+    let (settings_args, args) = separate_user_settings_from_tool_args(args);
     let user_settings = gather_user_settings(&settings_args)?;
     Ok((args, user_settings))
 }
 
-fn run_command(mut command: Command) -> Result<()> {
-    tracing::debug!("Executing build command: {command:?}");
-
-    let status = command
-        .status()
-        .with_context(|| format!("Failed to run command: {command:?}"))?;
-    if !status.success() {
-        bail!("Command failed with status: {status}; the command was: {command:?}");
-    }
-
-    Ok(())
-}
-
-fn run_tool_with_passthrough_args(
-    tool: &str,
-    args: Vec<String>,
-    user_settings: UserSettings,
-) -> Result<()> {
-    let tool_path = user_settings.llvm_location.get_tool_path(tool);
-    let mut command = Command::new(tool_path);
-    command.args(args);
-    run_command(command)
-}
-
-pub fn run_compiler(run_cxx: bool) -> Result<()> {
-    tracing::info!("Starting in compiler mode");
-
-    let (args, user_settings) = get_args_and_user_settings()?;
-    compiler::run(args, user_settings, run_cxx)
-}
-
-pub fn run_linker() -> Result<()> {
-    tracing::info!("Starting in linker mode");
-
-    let (args, user_settings) = get_args_and_user_settings()?;
-    compiler::link_only(args, user_settings)
-}
-
-pub fn run_ar() -> Result<()> {
-    tracing::info!("Starting in ar mode");
-
-    let (args, user_settings) = get_args_and_user_settings()?;
-    run_tool_with_passthrough_args("llvm-ar", args, user_settings)
-}
-
-pub fn run_nm() -> Result<()> {
-    tracing::info!("Starting in nm mode");
-
-    let (args, user_settings) = get_args_and_user_settings()?;
-    run_tool_with_passthrough_args("llvm-nm", args, user_settings)
-}
-
-pub fn run_ranlib() -> Result<()> {
-    tracing::info!("Starting in ranlib mode");
-
-    let (args, user_settings) = get_args_and_user_settings()?;
-    run_tool_with_passthrough_args("llvm-ranlib", args, user_settings)
-}
-
-pub fn get_sysroot() -> Result<PathBuf> {
-    let (_, user_settings) = get_args_and_user_settings()?;
-    user_settings.ensure_sysroot_location()
-}
-
-pub fn download_sysroot(tag_spec: TagSpec) -> Result<()> {
-    tracing::info!("Downloading sysroot: {:?}", tag_spec);
-
-    let (_, user_settings) = get_args_and_user_settings()?;
-    download::download_sysroot(tag_spec, &user_settings)
-}
-
-pub fn download_llvm(tag_spec: TagSpec) -> Result<()> {
-    tracing::info!("Downloading LLVM: {:?}", tag_spec);
-
-    let (_, user_settings) = get_args_and_user_settings()?;
-    download::download_llvm(tag_spec, &user_settings)
-}
-
-pub fn download_binaryen(tag_spec: TagSpec) -> Result<()> {
-    tracing::info!("Downloading binaryen: {:?}", tag_spec);
-
-    let (_, user_settings) = get_args_and_user_settings()?;
-    download::download_binaryen(tag_spec, &user_settings)
-}
-
-fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) {
-    let mut seen_dash_dash = false;
+fn separate_user_settings_from_tool_args(args: Vec<String>) -> (Vec<String>, Vec<String>) {
     let mut settings_args = Vec::new();
     let mut tool_args = Vec::new();
 
     for arg in args {
-        if arg == "--" {
-            seen_dash_dash = true;
-        } else if seen_dash_dash {
-            tool_args.push(arg);
-        } else if arg.starts_with("-s") && arg.contains('=') {
-            settings_args.push(arg);
+        if arg.starts_with("-s") && arg.contains('=') {
+            settings_args.push(arg[2..].to_owned());
         } else {
             tool_args.push(arg);
         }
@@ -282,7 +169,7 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
     (settings_args, tool_args)
 }
 
-fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
+pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
         None => LlvmLocation::DefaultPath(
@@ -498,7 +385,7 @@ fn read_bool_user_setting(value: &str) -> Option<bool> {
 
 fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<String>> {
     for arg in args {
-        if arg.starts_with(&format!("-s{}=", name)) {
+        if arg.starts_with(&format!("{}=", name)) {
             let value = arg.split('=').nth(1).unwrap();
             return Ok(Some(value.to_owned()));
         }
@@ -516,8 +403,7 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
 mod tests {
     use super::*;
     use crate::compiler::ModuleKind;
-    use std::{env, fs, path::PathBuf, process::Command};
-    use tempfile::TempDir;
+    use std::{env, path::PathBuf};
 
     #[test]
     fn test_read_string_list_user_setting() {
@@ -545,14 +431,14 @@ mod tests {
             "-sB=2".to_string(),
             "file.c".to_string(),
         ];
-        let (settings, rest) = separate_user_settings_args(args.clone());
-        assert_eq!(settings, vec!["-sA=1".to_string(), "-sB=2".to_string()]);
+        let (settings, rest) = separate_user_settings_from_tool_args(args.clone());
+        assert_eq!(settings, vec!["A=1".to_string(), "B=2".to_string()]);
         assert_eq!(rest, vec!["-c".to_string(), "file.c".to_string()]);
     }
 
     #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
-        let args = vec!["-sFOO=bar".to_string()];
+        let args = vec!["FOO=bar".to_string()];
         unsafe {
             env::remove_var("WASIXCC_FOO");
         }
@@ -570,14 +456,14 @@ mod tests {
     #[test]
     fn test_gather_user_settings() {
         let args = vec![
-            "-sSYSROOT=/sys".to_string(),
-            "-sCOMPILER_FLAGS=a:b".to_string(),
-            "-sLINKER_FLAGS=x:y".to_string(),
-            "-sRUN_WASM_OPT=1".to_string(),
-            "-sWASM_OPT_FLAGS=m:n".to_string(),
-            "-sMODULE_KIND=shared-library".to_string(),
-            "-sWASM_EXCEPTIONS=yes".to_string(),
-            "-sPIC=false".to_string(),
+            "SYSROOT=/sys".to_string(),
+            "COMPILER_FLAGS=a:b".to_string(),
+            "LINKER_FLAGS=x:y".to_string(),
+            "RUN_WASM_OPT=1".to_string(),
+            "WASM_OPT_FLAGS=m:n".to_string(),
+            "MODULE_KIND=shared-library".to_string(),
+            "WASM_EXCEPTIONS=yes".to_string(),
+            "PIC=false".to_string(),
         ];
         unsafe {
             env::remove_var("WASIXCC_LINKER_FLAGS");
@@ -600,34 +486,5 @@ mod tests {
         assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
         assert!(settings.wasm_exceptions);
         assert!(!settings.pic);
-    }
-
-    #[test]
-    fn test_run_command_success_and_failure() {
-        // assume 'true' and 'false' are available on PATH
-        run_command(Command::new("true")).unwrap();
-        let err = run_command(Command::new("false")).unwrap_err();
-        let msg = format!("{:?}", err);
-        assert!(msg.contains("Command failed"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_run_tool_with_passthrough_args() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = TempDir::new().unwrap();
-        let bin = tmp.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let tool_path = bin.join("dummytool");
-        fs::write(&tool_path, "#!/bin/sh\nexit 0").unwrap();
-        let mut perm = fs::metadata(&tool_path).unwrap().permissions();
-        perm.set_mode(0o755);
-        fs::set_permissions(&tool_path, perm).unwrap();
-        let user_settings = UserSettings {
-            llvm_location: LlvmLocation::UserProvided(tmp.path().to_path_buf()),
-            ..Default::default()
-        };
-        run_tool_with_passthrough_args("dummytool", vec!["X".into(), "Y".into()], user_settings)
-            .unwrap();
     }
 }

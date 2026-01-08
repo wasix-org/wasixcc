@@ -4,7 +4,10 @@ use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
 use reqwest::header::HeaderMap;
 
-use crate::UserSettings;
+use crate::{
+    UserSettings,
+    args::{BinaryenLocation, LlvmLocation},
+};
 
 const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
@@ -174,8 +177,7 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> 
     let asset_name = get_llvm_asset_name()?;
 
     let target_dir = match user_settings.llvm_location {
-        crate::LlvmLocation::DefaultPath(ref path)
-        | crate::LlvmLocation::UserProvided(ref path) => path,
+        LlvmLocation::DefaultPath(ref path) | LlvmLocation::UserProvided(ref path) => path,
     };
 
     if !target_dir.exists() {
@@ -247,8 +249,7 @@ pub(crate) fn download_binaryen(
     let asset_suffix = get_binaryen_asset_suffix()?;
 
     let target_dir = match user_settings.binaryen_location {
-        crate::BinaryenLocation::DefaultPath(ref path)
-        | crate::BinaryenLocation::UserProvided(ref path) => path,
+        BinaryenLocation::DefaultPath(ref path) | BinaryenLocation::UserProvided(ref path) => path,
     };
 
     if !target_dir.exists() {

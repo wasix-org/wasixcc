@@ -1,9 +1,18 @@
-use std::{env, io::Write, path::absolute};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::{OsStr, OsString},
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::LazyLock,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use super::*;
+use anyhow::{Context, Result, bail};
+
+use crate::args::UserSettings;
 
 mod response_file;
 
@@ -157,19 +166,10 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
             "clang"
         }));
         command.args(original_args);
-        command.args([OsStr::new("--target=wasm32-wasi")]);
-
-        let binaryen_bin_path = user_settings.binaryen_location.get_bin_path();
-        if let Some(binaryen_bin_path) = binaryen_bin_path {
-            command.env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    absolute(binaryen_bin_path).unwrap().display(),
-                    env::var("PATH").unwrap_or_default()
-                ),
-            );
-        }
+        command.args([
+            OsStr::new("--target=wasm32-wasi"),
+            OsStr::new("--no-wasm-opt"),
+        ]);
         return run_command(command);
     }
 
@@ -321,16 +321,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         .user_settings
         .llvm_location
         .get_tool_path(if state.cxx { "clang++" } else { "clang" });
-    let binaryen_bin_path = state.user_settings.binaryen_location.get_bin_path();
-    let path_env = if let Some(binaryen_bin_path) = &binaryen_bin_path {
-        format!(
-            "{}:{}",
-            absolute(binaryen_bin_path).unwrap().display(),
-            env::var("PATH").unwrap_or_default()
-        )
-    } else {
-        env::var("PATH").unwrap_or_default()
-    };
 
     let sysroot_path = state.user_settings.ensure_sysroot_location()?;
 
@@ -349,6 +339,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_MMAN"),
         OsStr::new("-D_WASI_EMULATED_SIGNAL"),
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
+        OsStr::new("--no-wasm-opt"),
     ];
 
     if state.user_settings.wasm_exceptions {
@@ -388,7 +379,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
         for input in &state.args.compiler_inputs {
             let mut command = Command::new(&compiler_path);
-            command.env("PATH", &path_env);
 
             command.args(&command_args);
 
@@ -412,7 +402,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         // If we're not linking, just push all inputs to clang to get one output
 
         let mut command = Command::new(&compiler_path);
-        command.env("PATH", &path_env);
 
         command.args(&command_args);
         command.args(&state.args.compiler_inputs);
@@ -1049,6 +1038,19 @@ fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
     }
 }
 
+pub fn run_command(mut command: Command) -> Result<()> {
+    tracing::debug!("Executing build command: {command:?}");
+
+    let status = command
+        .status()
+        .with_context(|| format!("Failed to run command: {command:?}"))?;
+    if !status.success() {
+        bail!("Command failed with status: {status}; the command was: {command:?}");
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1490,5 +1492,14 @@ mod tests {
         // Should NOT contain default args
         assert!(!script_content.contains("--forward-host-env"));
         assert!(!script_content.contains("--net"));
+    }
+
+    #[test]
+    fn test_run_command_success_and_failure() {
+        // assume 'true' and 'false' are available on PATH
+        run_command(Command::new("true")).unwrap();
+        let err = run_command(Command::new("false")).unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("Command failed"));
     }
 }

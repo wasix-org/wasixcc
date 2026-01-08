@@ -33,9 +33,9 @@ The installer will install wasixcc and its dependencies to `~/.wasixcc`
   ```sh
   cargo install wasixcc
   # Install executables
-  sudo wasixcc --install-executables /usr/local/bin
-  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
-  wasixcc --download-all
+  sudo wasixccenv install-executables /usr/local/bin
+  # Download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixccenv download-all
   ```
 
 - [Cargo binstall](https://crates.io/crates/cargo-binstall)</a>
@@ -43,9 +43,9 @@ The installer will install wasixcc and its dependencies to `~/.wasixcc`
   ```sh
   cargo binstall wasixcc
   # Install executables
-  sudo wasixcc --install-executables /usr/local/bin
-  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
-  wasixcc --download-all
+  sudo wasixccenv install-executables /usr/local/bin
+  # Download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixccenv download-all
   ```
 
 - Directly from the [git repo](https://github.com/wasix-org/wasixcc)
@@ -53,11 +53,11 @@ The installer will install wasixcc and its dependencies to `~/.wasixcc`
   ```sh
   git clone https://github.com/wasix-org/wasixcc
   cd wasixcc
-  cargo build -r -F bin --bin wasixcc
+  cargo build -r
   # Install executables
-  sudo wasixcc --install-executables /usr/local/bin
-  # Optionally, download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
-  wasixcc --download-all
+  sudo wasixccenv install-executables /usr/local/bin
+  # Download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
+  wasixcc download-all
   ```
 
 </details>
@@ -75,28 +75,26 @@ This will setup wasixcc and all dependencies in less than 10 seconds.
 
 ## Usage
 
-Basic usage:
+Environment management commands are available from the `wasixccenv` binary.
+Run `wasixccenv --help` for comprehensive usage instructions.
 
-```bash
-wasixcc [OPTIONS] -- [PASS-THROUGH OPTIONS]
-```
+To use the compiler toolchain, first run `wasixccenv install-executables` and
+then run the correct tool (`wasixcc`, `wasixar`, etc.).
 
-Run `wasixcc --help` for comprehensive usage instructions.
+### Common `wasixccenv` Options
 
-### Common Options
+| Option                       | Description                                                        |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `-h`, `--help`               | Print help message                                                 |
+| `-v`, `--version`            | Print version information                                          |
+| `install-executables <PATH>` | Install executables to specified path                              |
+| `download-sysroot <TAG>`     | Download and install WASIX libc sysroot ('latest' or specific tag) |
+| `download-llvm <TAG>`        | Download and install LLVM toolchain ('latest' or specific tag)     |
+| `download-all`               | Download and install the latest sysroot and LLVM toolchain         |
+| `print-sysroot`              | Print current sysroot location                                     |
+| `-s[CONFIG]=[VALUE]`         | Set configuration values (see below)                               |
 
-| Option                         | Description                                                        |
-| ------------------------------ | ------------------------------------------------------------------ |
-| `-h`, `--help`                 | Print help message                                                 |
-| `-v`, `--version`              | Print version information                                          |
-| `--install-executables <PATH>` | Install executables to specified path                              |
-| `--download-sysroot <TAG>`     | Download and install WASIX libc sysroot ('latest' or specific tag) |
-| `--download-llvm <TAG>`        | Download and install LLVM toolchain ('latest' or specific tag)     |
-| `--download-all`               | Download and install the latest sysroot and LLVM toolchain         |
-| `--print-sysroot`              | Print current sysroot location                                     |
-| `-s[CONFIG]=[VALUE]`           | Set configuration values (see below)                               |
-
-### Configuration Options
+### `wasixcc` Configuration Options
 
 Configuration can be set via command line (`-s` flag) or environment variables (`WASIXCC_` prefix):
 
@@ -256,7 +254,7 @@ To use `wasixcc` with CMake, you can use the
 export WASIXCC_XXX=YYY
 
 # wasix-toolchain.cmake references this variable
-export WASIX_SYSROOT=$(wasixcc --print-sysroot)
+export WASIX_SYSROOT=$(wasixccenv print-sysroot)
 
 # Disable wasm-opt during configuration...
 WASIXCC_RUN_WASM_OPT=no \

@@ -3,14 +3,14 @@ set -e
 
 WASIXCC_DIR="$HOME/.wasixcc"
 WASIXCC_BIN="$WASIXCC_DIR/bin"
-WASIXCC_EXECUTABLE="$WASIXCC_DIR/wasixcc"
+WASIXCC_EXECUTABLE="$WASIXCC_DIR/wasixccenv"
 
 # If set to latest => latest, if empty => do not install, else use as is
 WASIXCC_SYSROOT_TAG="latest"
 WASIXCC_LLVM_TAG="latest"
 WASIXCC_BINARYEN_TAG="latest"
 
-VERSION="0.2.6"
+VERSION="0.3.0"
 TARGET= # detected in detect_target()
 
 log() {
@@ -132,27 +132,27 @@ download_wasixcc() {
 # Install symlinks at ~/.wasixcc/bin
 install_executables() {
     mkdir -p "$WASIXCC_BIN"
-    "$WASIXCC_EXECUTABLE" --install-executables "$WASIXCC_BIN"
+    "$WASIXCC_EXECUTABLE" install-executables "$WASIXCC_BIN"
 }
 
 # Download sysroot, LLVM, and Binaryen
 download_dependencies() {
     case "$WASIXCC_SYSROOT_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" --download-sysroot ;;
+        latest) "$WASIXCC_EXECUTABLE" download-sysroot ;;
         "") : ;;
-        *) "$WASIXCC_EXECUTABLE" --download-sysroot "$WASIXCC_SYSROOT_TAG" ;;
+        *) "$WASIXCC_EXECUTABLE" download-sysroot "$WASIXCC_SYSROOT_TAG" ;;
     esac
 
     case "$WASIXCC_LLVM_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" --download-llvm ;;
+        latest) "$WASIXCC_EXECUTABLE" download-llvm ;;
         "") : ;;
-        *) "$WASIXCC_EXECUTABLE" --download-llvm "$WASIXCC_LLVM_TAG" ;;
+        *) "$WASIXCC_EXECUTABLE" download-llvm "$WASIXCC_LLVM_TAG" ;;
     esac
 
     case "$WASIXCC_BINARYEN_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" --download-binaryen ;;
+        latest) "$WASIXCC_EXECUTABLE" download-binaryen ;;
         "") : ;;
-        *) "$WASIXCC_EXECUTABLE" --download-binaryen "$WASIXCC_BINARYEN_TAG" ;;
+        *) "$WASIXCC_EXECUTABLE" download-binaryen "$WASIXCC_BINARYEN_TAG" ;;
     esac
 }
 

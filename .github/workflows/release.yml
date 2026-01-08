@@ -175,21 +175,20 @@ jobs:
         if: matrix.cross
         run: |
           TARGET=$(echo "${{ matrix.target }}" | sed 's/gnu/musl/g')
-          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target "$TARGET" -F bin --bin wasixcc
+          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target "$TARGET"
           mv target/$TARGET tmp
           mv tmp target/${{ matrix.target }}
 
       - name: Build binary (cargo)
         if: "!matrix.cross"
-        run: cargo build --release --target ${{ matrix.target }} -F bin --bin wasixcc
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package binary
         shell: bash
         run: |
-          BINARY_NAME="wasixcc"
           cd target/${{ matrix.target }}/release
-          tar czf ${BINARY_NAME}-${{ matrix.target }}.tar.gz ${BINARY_NAME}
-          mv ${BINARY_NAME}-${{ matrix.target }}.tar.gz ../../../
+          tar czf wasixcc-${{ matrix.target }}.tar.gz wasixccenv
+          mv wasixcc-${{ matrix.target }}.tar.gz ../../../
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
