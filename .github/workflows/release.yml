@@ -126,75 +126,8 @@ jobs:
           echo "✓ All version checks passed for version ${{ steps.extract.outputs.version }}"
 
   build:
-    needs: verify-version
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    # Do NOT run on Pull Requests
-    if: github.event_name != 'pull_request'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cross: true
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-          - target: aarch64-apple-darwin
-            os: macos-15
-            cross: false
-          - target: x86_64-apple-darwin
-            os: macos-15-intel
-            cross: false
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install cargo-binstall
-        if: matrix.cross
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install cross-compilation tools
-        if: matrix.cross
-        run: |
-          cargo binstall --no-confirm cross
-
-      - name: Build binary (cross)
-        if: matrix.cross
-        run: |
-          TARGET=$(echo "${{ matrix.target }}" | sed 's/gnu/musl/g')
-          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target "$TARGET"
-          mv target/$TARGET tmp
-          mv tmp target/${{ matrix.target }}
-
-      - name: Build binary (cargo)
-        if: "!matrix.cross"
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package binary
-        shell: bash
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar czf wasixcc-${{ matrix.target }}.tar.gz wasixccenv
-          mv wasixcc-${{ matrix.target }}.tar.gz ../../../
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasixcc-${{ matrix.target }}
-          path: wasixcc-${{ matrix.target }}.tar.gz
+    name: Build executables
+    uses: ./.github/workflows/build-release-bundle.yml
 
   publish-crates-io:
     name: Publish to crates.io

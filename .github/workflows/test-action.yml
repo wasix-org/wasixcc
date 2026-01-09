@@ -3,15 +3,21 @@ name: Test GitHub Action
 on:
   pull_request:
     paths:
-      - "action.yml"
-      - ".github/workflows/test-action.yml"
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  build-release-bundle:
+    name: Build executables
+    uses: ./.github/workflows/build-release-bundle.yml
+
   test-action:
+    needs: build-release-bundle
     name: Test Action on ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -34,19 +40,46 @@ jobs:
             container: alpine:3.23
     container: ${{ matrix.container }}
 
+    # On musl/arm we can not use js actions, so we download the artifact and clone the repo in the shell
     steps:
-      - name: Install git (Alpine only)
-        if: contains(matrix.name, 'alpine')
-        run: apk add --no-cache git
+      - name: Try to download bundle
+        id: try-to-download-bundle
+        continue-on-error: true
+        run: |
+          case "${{ matrix.name }}" in
+            *alpine*)
+              # curl and unzip are not preinstalled in alpine
+              apk add --no-cache curl unzip
+              ;;
+          esac
+          BASE_DIR="$HOME"
+          VERSION="actions"
+          RELEASE_DIR="$BASE_DIR/$VERSION"
+          mkdir $RELEASE_DIR
+          cd $BASE_DIR
+          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -L -o release-bundle.zip https://api.github.com/repos/wasix-org/wasixcc/actions/artifacts/"${{ needs.build-release-bundle.outputs.artifact-id }}"/zip
+          unzip release-bundle.zip
+          cd $RELEASE_DIR
+          tar xzf ../release-bundle.tar.gz
+          echo "release_base_url=file://$BASE_DIR" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Clone repository
         run: |
+          case "${{ matrix.name }}" in
+            *alpine*)
+              # git is not preinstalled in alpine
+              apk add --no-cache git
+              ;;
+          esac
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
 
       - name: Setup wasixcc with all components
         uses: ./
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          release-base-url: ${{ steps.try-to-download-bundle.outputs.release_base_url }}
+          version: ${{ steps.try-to-download-bundle.outputs.version }}
 
       - name: Verify wasixcc installation
         run: |
