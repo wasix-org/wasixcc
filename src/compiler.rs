@@ -58,8 +58,36 @@ static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
 static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-ftls-model", "--sysroot", "--target", "-mthread-model"].into());
 
-static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-o", "-mllvm", "-L", "-l", "-m", "-O", "-y", "-z"].into());
+static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "-o",
+        "-mllvm",
+        "-L",
+        "-l",
+        "-m",
+        "-O",
+        "-y",
+        "-z",
+        "--version-script",
+    ]
+    .into()
+});
+
+// Some wasm-ld flags are unsupported by wasm-ld but don't really matter
+static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "--end-group",
+        "--start-group",
+        "--as-needed",
+        "--no-as-needed",
+        "--allow-shlib-undefined",
+        "--enable-new-dtags",
+        "--version-script", // Prefix match for --version-script=... or --version-script,...
+        "--stats",
+        "--no-stats",
+    ]
+    .into()
+});
 
 static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-threads",
@@ -733,6 +761,25 @@ fn generate_shell_script(state: &State) -> Result<()> {
     Ok(())
 }
 
+fn should_discard_linker_flag(flag: &str) -> bool {
+    // Check for exact matches
+    if WASM_LD_FLAGS_TO_DISCARD.contains(flag) {
+        return true;
+    }
+
+    // Check for prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
+    for discard_flag in WASM_LD_FLAGS_TO_DISCARD.iter() {
+        if flag.starts_with(discard_flag) {
+            let rest = &flag[discard_flag.len()..];
+            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(',') {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 fn prepare_compiler_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
@@ -746,14 +793,22 @@ fn prepare_compiler_args(
         result: &mut PreparedArgs,
     ) -> Result<()> {
         if let Some(arg) = arg.strip_prefix("-Wl,") {
-            for split in arg.split(',') {
-                result.linker_args.push(split.to_owned());
+            let mut splits = arg.split(',').peekable();
+            while let Some(split) = splits.next() {
+                if !should_discard_linker_flag(split) {
+                    result.linker_args.push(split.to_owned());
+                } else if WASM_LD_FLAGS_WITH_ARGS.contains(split) {
+                    // This flag takes an argument, skip the next element too
+                    splits.next();
+                }
             }
         } else if arg == "-Xlinker" {
             let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -Xlinker");
             };
-            result.linker_args.push(next_arg);
+            if !should_discard_linker_flag(&next_arg) {
+                result.linker_args.push(next_arg);
+            }
         } else if arg == "-z" {
             let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -z");
@@ -931,9 +986,15 @@ fn prepare_linker_args(
             result.output = Some(output);
         } else if arg.starts_with('-') {
             let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
-            result.linker_args.push(arg);
-            if has_next_arg && let Some(next_arg) = next_arg.take() {
-                result.linker_args.push(next_arg);
+            if should_discard_linker_flag(&arg) {
+                if has_next_arg {
+                    next_arg.take();
+                }
+            } else {
+                result.linker_args.push(arg);
+                if has_next_arg && let Some(next_arg) = next_arg.take() {
+                    result.linker_args.push(next_arg);
+                }
             }
         } else {
             // Assume it's an input file
@@ -1490,5 +1551,99 @@ mod tests {
         // Should NOT contain default args
         assert!(!script_content.contains("--forward-host-env"));
         assert!(!script_content.contains("--net"));
+    }
+
+    #[test]
+    fn test_should_discard_linker_flag() {
+        // Test exact matches
+        assert!(should_discard_linker_flag("--end-group"));
+        assert!(should_discard_linker_flag("--start-group"));
+        assert!(should_discard_linker_flag("--as-needed"));
+        assert!(should_discard_linker_flag("--no-as-needed"));
+        assert!(should_discard_linker_flag("--allow-shlib-undefined"));
+        assert!(should_discard_linker_flag("--enable-new-dtags"));
+        assert!(should_discard_linker_flag("--stats"));
+        assert!(should_discard_linker_flag("--no-stats"));
+
+        // Test version-script with = syntax
+        assert!(should_discard_linker_flag(
+            "--version-script=/path/to/script"
+        ));
+        assert!(should_discard_linker_flag("--version-script=foo.txt"));
+
+        // Test version-script with , syntax
+        assert!(should_discard_linker_flag(
+            "--version-script,/path/to/script"
+        ));
+        assert!(should_discard_linker_flag("--version-script,foo.txt"));
+
+        // Test flags that should NOT be discarded
+        assert!(!should_discard_linker_flag("-L"));
+        assert!(!should_discard_linker_flag("-l"));
+        assert!(!should_discard_linker_flag("--export-dynamic"));
+        assert!(!should_discard_linker_flag("-o"));
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_wl() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Wl,--start-group".to_string(),
+            "-Wl,--end-group".to_string(),
+            "-Wl,--as-needed".to_string(),
+            "-Wl,-L/some/path".to_string(),
+            "-Wl,--version-script=/path/to/script".to_string(),
+            "-Wl,--version-script,/path/to/script2".to_string(),
+            "-Wl,--stats".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Only -L should be forwarded, all discard flags should be filtered out
+        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--start-group".to_string(),
+            "-Xlinker".to_string(),
+            "--as-needed".to_string(),
+            "-Xlinker".to_string(),
+            "-L/some/path".to_string(),
+            "-Xlinker".to_string(),
+            "--version-script=path/to/script".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Only -L should be forwarded, all discard flags should be filtered out
+        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_linker_args_discard_flags() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "--start-group".to_string(),
+            "--end-group".to_string(),
+            "--as-needed".to_string(),
+            "-L/some/path".to_string(),
+            "--version-script=/path/to/script".to_string(),
+            "--version-script".to_string(),
+            "another.txt".to_string(),
+            "--stats".to_string(),
+            "-o".to_string(),
+            "output.wasm".to_string(),
+            "input.o".to_string(),
+        ];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+
+        // Only -L should be kept, all discard flags should be filtered out
+        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+        assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
+        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
     }
 }
