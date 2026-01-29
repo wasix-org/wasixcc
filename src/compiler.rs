@@ -73,7 +73,7 @@ static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .into()
 });
 
-// Some wasm-ld flags are unsupported by wasm-ld but don't really matter
+// Some common linker flags are unsupported by wasm-ld
 static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     [
         "--end-group",
