@@ -791,40 +791,17 @@ fn prepare_compiler_args(
         user_settings: &mut UserSettings,
         build_settings: &mut BuildSettings,
         result: &mut PreparedArgs,
-        skip_next_xlinker: &mut bool,
     ) -> Result<()> {
         if let Some(arg) = arg.strip_prefix("-Wl,") {
             let mut splits = arg.split(',').peekable();
             while let Some(split) = splits.next() {
-                if !should_discard_linker_flag(split) {
-                    result.linker_args.push(split.to_owned());
-                } else if WASM_LD_FLAGS_WITH_ARGS.contains(split) {
-                    // This flag takes an argument, skip the next element too
-                    splits.next();
-                }
+                result.linker_args.push(split.to_owned());
             }
         } else if arg == "-Xlinker" {
-            if *skip_next_xlinker {
-                // This -Xlinker is an argument for a previously discarded flag
-                // Consume it and its argument
-                *skip_next_xlinker = false;
-                let Some(_) = next_arg.take() else {
-                    bail!("Expected argument after -Xlinker for discarded flag's argument");
-                };
-            } else {
-                let Some(linker_arg) = next_arg.take() else {
-                    bail!("Expected argument after -Xlinker");
-                };
-                if should_discard_linker_flag(&linker_arg) {
-                    // Check if the discarded flag takes an argument
-                    if WASM_LD_FLAGS_WITH_ARGS.contains(&linker_arg[..]) {
-                        // Mark that the next -Xlinker should be skipped
-                        *skip_next_xlinker = true;
-                    }
-                } else {
-                    result.linker_args.push(linker_arg);
-                }
-            }
+            let Some(linker_arg) = next_arg.take() else {
+                bail!("Expected argument after -Xlinker");
+            };
+            result.linker_args.push(linker_arg);
         } else if arg == "-z" {
             let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -z");
@@ -933,7 +910,6 @@ fn prepare_compiler_args(
     extra_flags.extend(extra_post_flags2);
     let mut args = response_file::ArgumentsStack::new(extra_flags);
     let mut next_arg = None;
-    let mut skip_next_xlinker = false;
     loop {
         let arg = if let Some(arg) = next_arg.take() {
             arg
@@ -950,13 +926,9 @@ fn prepare_compiler_args(
             user_settings,
             &mut build_settings,
             &mut result,
-            &mut skip_next_xlinker,
         )?;
     }
-
-    if skip_next_xlinker {
-        bail!("Expected -Xlinker argument for discarded flag that takes an argument");
-    }
+    result.linker_args = filter_linker_args(result.linker_args.into_iter());
 
     if user_settings.module_kind.is_none() {
         for arg in &result.compiler_args {
@@ -985,10 +957,36 @@ fn prepare_compiler_args(
     Ok((result, build_settings))
 }
 
+fn filter_linker_args(mut args: impl Iterator<Item = String>) -> Vec<String> {
+    let mut next_is_value = false;
+    let mut discard_next_value = false;
+    let mut result = Vec::new();
+    while let Some(arg) = args.next() {
+        if next_is_value {
+            if !discard_next_value {
+                result.push(arg);
+            }
+            next_is_value = false;
+            discard_next_value = false;
+            continue;
+        }
+
+        let has_arg = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
+        next_is_value = has_arg;
+        if should_discard_linker_flag(&arg) {
+            discard_next_value = has_arg;
+            continue;
+        }
+        result.push(arg);
+    }
+    return result;
+}
+
 fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
+    let args = filter_linker_args(args.into_iter());
     fn process_one_arg(
         arg: String,
         next_arg: &mut Option<String>,
@@ -1008,15 +1006,9 @@ fn prepare_linker_args(
             result.output = Some(output);
         } else if arg.starts_with('-') {
             let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
-            if should_discard_linker_flag(&arg) {
-                if has_next_arg {
-                    next_arg.take();
-                }
-            } else {
-                result.linker_args.push(arg);
-                if has_next_arg && let Some(next_arg) = next_arg.take() {
-                    result.linker_args.push(next_arg);
-                }
+            result.linker_args.push(arg);
+            if has_next_arg && let Some(next_arg) = next_arg.take() {
+                result.linker_args.push(next_arg);
             }
         } else {
             // Assume it's an input file
@@ -1692,25 +1684,6 @@ mod tests {
 
         // Only -L should be forwarded, all discard flags (including their arguments) should be filtered out
         assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg_missing() {
-        let mut us = UserSettings::default();
-        // Missing the second -Xlinker argument
-        let args = vec![
-            "-Xlinker".to_string(),
-            "--version-script".to_string(),
-            "test.c".to_string(),
-        ];
-        let result = prepare_compiler_args(args, &mut us, false);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected -Xlinker argument")
-        );
     }
 
     #[test]
