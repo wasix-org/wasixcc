@@ -928,7 +928,7 @@ fn prepare_compiler_args(
             &mut result,
         )?;
     }
-    result.linker_args = filter_linker_args(result.linker_args.into_iter());
+    result.linker_args = filter_linker_args(result.linker_args.into_iter()).collect();
 
     if user_settings.module_kind.is_none() {
         for arg in &result.compiler_args {
@@ -957,36 +957,32 @@ fn prepare_compiler_args(
     Ok((result, build_settings))
 }
 
-fn filter_linker_args(mut args: impl Iterator<Item = String>) -> Vec<String> {
+fn filter_linker_args(args: impl Iterator<Item = String>) -> impl Iterator<Item = String> {
     let mut next_is_value = false;
     let mut discard_next_value = false;
-    let mut result = Vec::new();
-    while let Some(arg) = args.next() {
+    args.filter(move |arg| {
         if next_is_value {
-            if !discard_next_value {
-                result.push(arg);
-            }
+            // If this is a value for a flag we decided to discard, discard it too
+            let include_this = !discard_next_value;
             next_is_value = false;
             discard_next_value = false;
-            continue;
+            return include_this;
         }
 
-        let has_arg = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
-        next_is_value = has_arg;
+        next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
         if should_discard_linker_flag(&arg) {
-            discard_next_value = has_arg;
-            continue;
+            discard_next_value = next_is_value;
+            return false;
         }
-        result.push(arg);
-    }
-    return result;
+        return true;
+    })
 }
 
 fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let args = filter_linker_args(args.into_iter());
+    let args = filter_linker_args(args.into_iter()).collect();
     fn process_one_arg(
         arg: String,
         next_arg: &mut Option<String>,
