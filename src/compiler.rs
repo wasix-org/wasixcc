@@ -1626,6 +1626,26 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_multiple_via_wl() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Wl,--end-group".to_string(),
+            "-Wl,--end-group,-L/some/path/a,--end-group".to_string(),
+            "-Wl,--end-group,--version-script=/path/to/script,-L/some/path/b,--end-group".to_string(),
+            "-Wl,--end-group,--version-script,/path/to/script,-L/some/path/c,--end-group".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Only -L should be forwarded, all discard flags should be filtered out
+        assert_eq!(pa.linker_args, vec![
+            "-L/some/path/a".to_string(),
+            "-L/some/path/b".to_string(),
+            "-L/some/path/c".to_string()
+        ]);
+    }
+
+    #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_xlinker() {
         let mut us = UserSettings::default();
         let args = vec![
