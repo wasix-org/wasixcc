@@ -793,15 +793,14 @@ fn prepare_compiler_args(
         result: &mut PreparedArgs,
     ) -> Result<()> {
         if let Some(arg) = arg.strip_prefix("-Wl,") {
-            let mut splits = arg.split(',').peekable();
-            while let Some(split) = splits.next() {
+            for split in arg.split(',') {
                 result.linker_args.push(split.to_owned());
             }
         } else if arg == "-Xlinker" {
-            let Some(linker_arg) = next_arg.take() else {
+            let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -Xlinker");
             };
-            result.linker_args.push(linker_arg);
+            result.linker_args.push(next_arg);
         } else if arg == "-z" {
             let Some(next_arg) = next_arg.take() else {
                 bail!("Expected argument after -z");
