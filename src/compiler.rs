@@ -1631,18 +1631,23 @@ mod tests {
         let args = vec![
             "-Wl,--end-group".to_string(),
             "-Wl,--end-group,-L/some/path/a,--end-group".to_string(),
-            "-Wl,--end-group,--version-script=/path/to/script,-L/some/path/b,--end-group".to_string(),
-            "-Wl,--end-group,--version-script,/path/to/script,-L/some/path/c,--end-group".to_string(),
+            "-Wl,--end-group,--version-script=/path/to/script,-L/some/path/b,--end-group"
+                .to_string(),
+            "-Wl,--end-group,--version-script,/path/to/script,-L/some/path/c,--end-group"
+                .to_string(),
             "test.c".to_string(),
         ];
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
         // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(pa.linker_args, vec![
-            "-L/some/path/a".to_string(),
-            "-L/some/path/b".to_string(),
-            "-L/some/path/c".to_string()
-        ]);
+        assert_eq!(
+            pa.linker_args,
+            vec![
+                "-L/some/path/a".to_string(),
+                "-L/some/path/b".to_string(),
+                "-L/some/path/c".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -1700,10 +1705,12 @@ mod tests {
         ];
         let result = prepare_compiler_args(args, &mut us, false);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected -Xlinker argument"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected -Xlinker argument")
+        );
     }
 
     #[test]
@@ -1717,10 +1724,12 @@ mod tests {
         ];
         let result = prepare_compiler_args(args, &mut us, false);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Expected argument after -Xlinker"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Expected argument after -Xlinker")
+        );
     }
 
     #[test]
