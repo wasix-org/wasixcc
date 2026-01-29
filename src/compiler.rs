@@ -761,16 +761,12 @@ fn generate_shell_script(state: &State) -> Result<()> {
     Ok(())
 }
 
+/// Decide whether a linker flag should be discarded for wasm-ld.
 fn should_discard_linker_flag(flag: &str) -> bool {
-    // Check for exact matches
-    if WASM_LD_FLAGS_TO_DISCARD.contains(flag) {
-        return true;
-    }
-
-    // Check for prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
     for discard_flag in WASM_LD_FLAGS_TO_DISCARD.iter() {
         if flag.starts_with(discard_flag) {
             let rest = &flag[discard_flag.len()..];
+            // Check for exact and prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
             if rest.is_empty() || rest.starts_with('=') || rest.starts_with(',') {
                 return true;
             }
@@ -778,6 +774,28 @@ fn should_discard_linker_flag(flag: &str) -> bool {
     }
 
     false
+}
+
+/// Filters out unsupported linker flags for wasm-ld.
+fn filter_linker_flags(args: impl Iterator<Item = String>) -> impl Iterator<Item = String> {
+    let mut next_is_value = false;
+    let mut discard_next_value = false;
+    args.filter(move |arg| {
+        if next_is_value {
+            // If this is a value for a flag we decided to discard, discard it too
+            let include_this = !discard_next_value;
+            next_is_value = false;
+            discard_next_value = false;
+            return include_this;
+        }
+
+        next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
+        if should_discard_linker_flag(&arg) {
+            discard_next_value = next_is_value;
+            return false;
+        }
+        return true;
+    })
 }
 
 fn prepare_compiler_args(
@@ -927,7 +945,7 @@ fn prepare_compiler_args(
             &mut result,
         )?;
     }
-    result.linker_args = filter_linker_args(result.linker_args.into_iter()).collect();
+    result.linker_args = filter_linker_flags(result.linker_args.into_iter()).collect();
 
     if user_settings.module_kind.is_none() {
         for arg in &result.compiler_args {
@@ -956,32 +974,11 @@ fn prepare_compiler_args(
     Ok((result, build_settings))
 }
 
-fn filter_linker_args(args: impl Iterator<Item = String>) -> impl Iterator<Item = String> {
-    let mut next_is_value = false;
-    let mut discard_next_value = false;
-    args.filter(move |arg| {
-        if next_is_value {
-            // If this is a value for a flag we decided to discard, discard it too
-            let include_this = !discard_next_value;
-            next_is_value = false;
-            discard_next_value = false;
-            return include_this;
-        }
-
-        next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
-        if should_discard_linker_flag(&arg) {
-            discard_next_value = next_is_value;
-            return false;
-        }
-        return true;
-    })
-}
-
 fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let args = filter_linker_args(args.into_iter()).collect();
+    let args = filter_linker_flags(args.into_iter()).collect();
     fn process_one_arg(
         arg: String,
         next_arg: &mut Option<String>,
