@@ -808,7 +808,9 @@ fn prepare_compiler_args(
                 // This -Xlinker is an argument for a previously discarded flag
                 // Consume it and its argument
                 *skip_next_xlinker = false;
-                next_arg.take();
+                let Some(_) = next_arg.take() else {
+                    bail!("Expected argument after -Xlinker for discarded flag's argument");
+                };
             } else {
                 let Some(linker_arg) = next_arg.take() else {
                     bail!("Expected argument after -Xlinker");
@@ -950,6 +952,10 @@ fn prepare_compiler_args(
             &mut result,
             &mut skip_next_xlinker,
         )?;
+    }
+
+    if skip_next_xlinker {
+        bail!("Expected -Xlinker argument for discarded flag that takes an argument");
     }
 
     if user_settings.module_kind.is_none() {
@@ -1661,6 +1667,40 @@ mod tests {
 
         // Only -L should be forwarded, all discard flags (including their arguments) should be filtered out
         assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg_missing() {
+        let mut us = UserSettings::default();
+        // Missing the second -Xlinker argument
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "test.c".to_string(),
+        ];
+        let result = prepare_compiler_args(args, &mut us, false);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected -Xlinker argument"));
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_incomplete() {
+        let mut us = UserSettings::default();
+        // Missing the argument after the second -Xlinker
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "-Xlinker".to_string(),
+        ];
+        let result = prepare_compiler_args(args, &mut us, false);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected argument after -Xlinker"));
     }
 
     #[test]
