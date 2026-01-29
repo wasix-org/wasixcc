@@ -791,6 +791,7 @@ fn prepare_compiler_args(
         user_settings: &mut UserSettings,
         build_settings: &mut BuildSettings,
         result: &mut PreparedArgs,
+        skip_next_xlinker: &mut bool,
     ) -> Result<()> {
         if let Some(arg) = arg.strip_prefix("-Wl,") {
             let mut splits = arg.split(',').peekable();
@@ -803,11 +804,26 @@ fn prepare_compiler_args(
                 }
             }
         } else if arg == "-Xlinker" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -Xlinker");
-            };
-            if !should_discard_linker_flag(&next_arg) {
-                result.linker_args.push(next_arg);
+            if *skip_next_xlinker {
+                // This -Xlinker is an argument for a previously discarded flag
+                // Consume it and its argument
+                *skip_next_xlinker = false;
+                let Some(_) = next_arg.take() else {
+                    bail!("Expected argument after -Xlinker for discarded flag's argument");
+                };
+            } else {
+                let Some(linker_arg) = next_arg.take() else {
+                    bail!("Expected argument after -Xlinker");
+                };
+                if should_discard_linker_flag(&linker_arg) {
+                    // Check if the discarded flag takes an argument
+                    if WASM_LD_FLAGS_WITH_ARGS.contains(&linker_arg[..]) {
+                        // Mark that the next -Xlinker should be skipped
+                        *skip_next_xlinker = true;
+                    }
+                } else {
+                    result.linker_args.push(linker_arg);
+                }
             }
         } else if arg == "-z" {
             let Some(next_arg) = next_arg.take() else {
@@ -917,6 +933,7 @@ fn prepare_compiler_args(
     extra_flags.extend(extra_post_flags2);
     let mut args = response_file::ArgumentsStack::new(extra_flags);
     let mut next_arg = None;
+    let mut skip_next_xlinker = false;
     loop {
         let arg = if let Some(arg) = next_arg.take() {
             arg
@@ -933,7 +950,12 @@ fn prepare_compiler_args(
             user_settings,
             &mut build_settings,
             &mut result,
+            &mut skip_next_xlinker,
         )?;
+    }
+
+    if skip_next_xlinker {
+        bail!("Expected -Xlinker argument for discarded flag that takes an argument");
     }
 
     if user_settings.module_kind.is_none() {
@@ -1621,6 +1643,64 @@ mod tests {
 
         // Only -L should be forwarded, all discard flags should be filtered out
         assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--start-group".to_string(),
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "-Xlinker".to_string(),
+            "/path/to/script".to_string(),
+            "-Xlinker".to_string(),
+            "-L/some/path".to_string(),
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "-Xlinker".to_string(),
+            "/path/to/script2".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Only -L should be forwarded, all discard flags (including their arguments) should be filtered out
+        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg_missing() {
+        let mut us = UserSettings::default();
+        // Missing the second -Xlinker argument
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "test.c".to_string(),
+        ];
+        let result = prepare_compiler_args(args, &mut us, false);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected -Xlinker argument"));
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_incomplete() {
+        let mut us = UserSettings::default();
+        // Missing the argument after the second -Xlinker
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--version-script".to_string(),
+            "-Xlinker".to_string(),
+        ];
+        let result = prepare_compiler_args(args, &mut us, false);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected argument after -Xlinker"));
     }
 
     #[test]
