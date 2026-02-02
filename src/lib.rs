@@ -135,6 +135,7 @@ struct UserSettings {
     link_symbolic: bool,                        // key name: LINK_SYMBOLIC
     generate_shell_script: bool,                // key name: GENERATE_SHELL_SCRIPT
     shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
+    discard_unsupported_flags: bool,            // key name: DISCARD_UNSUPPORTED_FLAGS
 }
 
 impl UserSettings {
@@ -427,6 +428,13 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
             None => vec![],
         };
 
+    let discard_unsupported_flags =
+        match try_get_user_setting_value("DISCARD_UNSUPPORTED_FLAGS", args)? {
+            Some(value) => read_bool_user_setting(&value)
+                .with_context(|| format!("Invalid value {value} for DISCARD_UNSUPPORTED_FLAGS"))?,
+            None => false,
+        };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -450,6 +458,7 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         link_symbolic,
         generate_shell_script,
         shell_script_wasmer_args,
+        discard_unsupported_flags,
     })
 }
 

@@ -764,8 +764,7 @@ fn generate_shell_script(state: &State) -> Result<()> {
 /// Decide whether a linker flag should be discarded for wasm-ld.
 fn should_discard_linker_flag(flag: &str) -> bool {
     for discard_flag in WASM_LD_FLAGS_TO_DISCARD.iter() {
-        if flag.starts_with(discard_flag) {
-            let rest = &flag[discard_flag.len()..];
+        if let Some(rest) = flag.strip_prefix(discard_flag) {
             // Check for exact and prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
             if rest.is_empty() || rest.starts_with('=') || rest.starts_with(',') {
                 return true;
@@ -790,11 +789,11 @@ fn filter_linker_flags(args: impl Iterator<Item = String>) -> impl Iterator<Item
         }
 
         next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
-        if should_discard_linker_flag(&arg) {
+        if should_discard_linker_flag(arg) {
             discard_next_value = next_is_value;
             return false;
         }
-        return true;
+        true
     })
 }
 
@@ -945,7 +944,11 @@ fn prepare_compiler_args(
             &mut result,
         )?;
     }
-    result.linker_args = filter_linker_flags(result.linker_args.into_iter()).collect();
+    result.linker_args = if user_settings.discard_unsupported_flags {
+        filter_linker_flags(result.linker_args.into_iter()).collect()
+    } else {
+        result.linker_args
+    };
 
     if user_settings.module_kind.is_none() {
         for arg in &result.compiler_args {
@@ -978,7 +981,11 @@ fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let args = filter_linker_flags(args.into_iter()).collect();
+    let args = if user_settings.discard_unsupported_flags {
+        filter_linker_flags(args.into_iter()).collect()
+    } else {
+        args
+    };
     fn process_one_arg(
         arg: String,
         next_arg: &mut Option<String>,
@@ -1593,6 +1600,7 @@ mod tests {
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_wl() {
         let mut us = UserSettings::default();
+        us.discard_unsupported_flags = true;
         let args = vec![
             "-Wl,--start-group".to_string(),
             "-Wl,--end-group".to_string(),
@@ -1612,6 +1620,7 @@ mod tests {
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_multiple_via_wl() {
         let mut us = UserSettings::default();
+        us.discard_unsupported_flags = true;
         let args = vec![
             "-Wl,--end-group".to_string(),
             "-Wl,--end-group,-L/some/path/a,--end-group".to_string(),
@@ -1635,8 +1644,28 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_compiler_args_does_not_discard_linker_flags_by_default() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Xlinker".to_string(),
+            "--start-group".to_string(),
+            "-Xlinker".to_string(),
+            "-L/some/path".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Only -L should be forwarded, all discard flags should be filtered out
+        assert_eq!(
+            pa.linker_args,
+            vec!["--start-group".to_string(), "-L/some/path".to_string()]
+        );
+    }
+
+    #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_xlinker() {
         let mut us = UserSettings::default();
+        us.discard_unsupported_flags = true;
         let args = vec![
             "-Xlinker".to_string(),
             "--start-group".to_string(),
@@ -1657,6 +1686,7 @@ mod tests {
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg() {
         let mut us = UserSettings::default();
+        us.discard_unsupported_flags = true;
         let args = vec![
             "-Xlinker".to_string(),
             "--start-group".to_string(),
@@ -1700,6 +1730,7 @@ mod tests {
     #[test]
     fn test_prepare_linker_args_discard_flags() {
         let mut us = UserSettings::default();
+        us.discard_unsupported_flags = true;
         let args = vec![
             "--start-group".to_string(),
             "--end-group".to_string(),

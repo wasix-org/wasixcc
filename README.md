@@ -124,6 +124,7 @@ Configuration can be set via command line (`-s` flag) or environment variables (
 | `LINK_SYMBOLIC`                 | Enable -Bsymbolic linking (enabled by default)                                                 |
 | `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
 | `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
+| `DISCARD_UNSUPPORTED_FLAGS`     | Some flags that you would use with native tools don't work when targeting WASIX. Discard them. |
 
 ### Environment Variables
 
