@@ -1655,7 +1655,6 @@ mod tests {
         ];
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
-        // Only -L should be forwarded, all discard flags should be filtered out
         assert_eq!(
             pa.linker_args,
             vec!["--start-group".to_string(), "-L/some/path".to_string()]
@@ -1746,7 +1745,6 @@ mod tests {
         ];
         let pa = prepare_linker_args(args, &mut us).unwrap();
 
-        // Only -L should be kept, all discard flags should be filtered out
         assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
         assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
         assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
