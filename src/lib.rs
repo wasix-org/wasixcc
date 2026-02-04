@@ -136,6 +136,7 @@ struct UserSettings {
     generate_shell_script: bool,                // key name: GENERATE_SHELL_SCRIPT
     shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
     discard_unsupported_flags: bool,            // key name: DISCARD_UNSUPPORTED_FLAGS
+    autoconf_workarounds: bool,                 // key name: AUTOCONF_WORKAROUNDS
 }
 
 impl UserSettings {
@@ -441,6 +442,12 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
             None => false,
         };
 
+    let autoconf_workarounds = match try_get_user_setting_value("AUTOCONF_WORKAROUNDS", args)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for AUTOCONF_WORKAROUNDS"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -465,6 +472,7 @@ fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         generate_shell_script,
         shell_script_wasmer_args,
         discard_unsupported_flags,
+        autoconf_workarounds,
     })
 }
 

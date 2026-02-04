@@ -270,6 +270,16 @@ The following configuration options are available:");
                            in errors if the flags are not supported.
                            Setting this option to `yes` will cause some known
                            unsupported flags and settings to be discarded.
+  AUTOCONF_WORKAROUNDS=<BOOL>
+                           Attempt to detect autoconf tests and run workarounds
+                           to make them behave as intended. conftests for functions
+                           usually check the availability of a function name by calling
+                           it as `int funcname(void);` and testing if the compiler
+                           can compile that. However when targeting WebAssembly you can
+                           only call functions with the correct signature, so such
+                           tests will always fail. Enabling this option will try to
+                           detect such tests and allow the compilation to succeed
+                           even if there is a signature mismatch.
 
 Note: Pass-through options are passed directly to the underlying
 LLVM executables (e.g., clang, wasm-ld, etc.). This is useful for

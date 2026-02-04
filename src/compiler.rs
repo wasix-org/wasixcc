@@ -797,8 +797,26 @@ fn filter_linker_flags(args: impl Iterator<Item = String>) -> impl Iterator<Item
     })
 }
 
+fn detect_autoconf_test<'a>(args: impl IntoIterator<Item = &'a String>) -> bool {
+    // Detect -o conftest and conftest.c
+    let mut next_is_output = false;
+    for arg in args {
+        match arg.as_str() {
+            "conftest.c" | "conftest.cpp" => return true,
+            "-o" => {
+                next_is_output = true;
+            }
+            "conftest" if next_is_output => return true,
+            _ => {
+                next_is_output = false;
+            }
+        }
+    }
+    false
+}
+
 fn prepare_compiler_args(
-    args: Vec<String>,
+    mut args: Vec<String>,
     user_settings: &mut UserSettings,
     run_cxx: bool,
 ) -> Result<(PreparedArgs, BuildSettings)> {
@@ -893,6 +911,13 @@ fn prepare_compiler_args(
         debug_level: DebugLevel::G0,
         use_wasm_opt: true,
     };
+
+    if user_settings.autoconf_workarounds && detect_autoconf_test(&args) {
+        // wasm opt fails if signature mismatches produce an invalid module
+        user_settings.run_wasm_opt = Some(false);
+        // Pass the flag to the linker to avoid shlib signature checks
+        args.push("-Wl,--no-shlib-sigcheck".to_owned());
+    }
 
     let mut extra_flags = vec![];
     std::mem::swap(&mut extra_flags, &mut user_settings.extra_compiler_flags);
@@ -1595,6 +1620,23 @@ mod tests {
         assert!(!should_discard_linker_flag("-l"));
         assert!(!should_discard_linker_flag("--export-dynamic"));
         assert!(!should_discard_linker_flag("-o"));
+    }
+
+    #[test]
+    fn test_autoconf_workaround() {
+        let mut us = UserSettings::default();
+        us.autoconf_workarounds = true;
+        let args = vec![
+            "-o".to_string(),
+            "conftest".to_string(),
+            "conftest.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // Should have disabled wasm-opt
+        assert_eq!(us.run_wasm_opt, Some(false));
+        // Should have added --no-shlib-sigcheck
+        assert_eq!(pa.linker_args, vec!["--no-shlib-sigcheck".to_string()]);
     }
 
     #[test]

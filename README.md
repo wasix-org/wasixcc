@@ -125,6 +125,7 @@ Configuration can be set via command line (`-s` flag) or environment variables (
 | `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
 | `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
 | `DISCARD_UNSUPPORTED_FLAGS`     | Some flags that you would use with native tools don't work when targeting WASIX. Discard them. |
+| `AUTOCONF_WORKAROUNDS`          | Attempt to detect autoconf tests and make them work as intended.                               |
 
 ### Environment Variables
 
