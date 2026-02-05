@@ -273,7 +273,11 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
             seen_dash_dash = true;
         } else if seen_dash_dash {
             tool_args.push(arg);
-        } else if arg.strip_prefix("-s").is_some_and(|rest| rest.starts_with(char::is_uppercase)) && arg.contains('=') {
+        } else if arg
+            .strip_prefix("-s")
+            .is_some_and(|rest| rest.starts_with(char::is_uppercase))
+            && arg.contains('=')
+        {
             // Match -s<UPPERCASE_CONFIG>=<VALUE>, e.g., -sSYSROOT=/path
             // This ensures we don't accidentally capture compiler flags like -std=c++20
             settings_args.push(arg);
@@ -589,7 +593,6 @@ mod tests {
             ]
         );
     }
-
 
     #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
