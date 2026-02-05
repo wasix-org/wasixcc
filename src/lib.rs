@@ -273,7 +273,13 @@ fn separate_user_settings_args(args: Vec<String>) -> (Vec<String>, Vec<String>) 
             seen_dash_dash = true;
         } else if seen_dash_dash {
             tool_args.push(arg);
-        } else if arg.starts_with("-s") && arg.contains('=') {
+        } else if arg
+            .strip_prefix("-s")
+            .is_some_and(|rest| rest.starts_with(char::is_uppercase))
+            && arg.contains('=')
+        {
+            // Match -s<UPPERCASE_CONFIG>=<VALUE>, e.g., -sSYSROOT=/path
+            // This ensures we don't accidentally capture compiler flags like -std=c++20
             settings_args.push(arg);
         } else {
             tool_args.push(arg);
@@ -557,6 +563,35 @@ mod tests {
         let (settings, rest) = separate_user_settings_args(args.clone());
         assert_eq!(settings, vec!["-sA=1".to_string(), "-sB=2".to_string()]);
         assert_eq!(rest, vec!["-c".to_string(), "file.c".to_string()]);
+    }
+
+    #[test]
+    fn test_separate_user_settings_args_does_not_match_compiler_flags() {
+        // Flags like -std=c++20 should NOT be treated as user settings
+        let args = vec![
+            "-std=c++20".to_string(),
+            "-sSYSROOT=/path".to_string(),
+            "-std=c11".to_string(),
+            "-static".to_string(),
+            "-stack-size=1000".to_string(),
+            "-save-temps".to_string(),
+            "file.c".to_string(),
+        ];
+        let (settings, rest) = separate_user_settings_args(args.clone());
+        // Only -sSYSROOT should be a settings arg (starts with -s and has uppercase letter)
+        assert_eq!(settings, vec!["-sSYSROOT=/path".to_string()]);
+        // All other flags should be passed as tool args
+        assert_eq!(
+            rest,
+            vec![
+                "-std=c++20".to_string(),
+                "-std=c11".to_string(),
+                "-static".to_string(),
+                "-stack-size=1000".to_string(),
+                "-save-temps".to_string(),
+                "file.c".to_string(),
+            ]
+        );
     }
 
     #[test]
