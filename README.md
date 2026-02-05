@@ -229,6 +229,10 @@ configuration:
 # Set up wasixcc's settings
 export WASIXCC_XXX=YYY
 
+# The way configure detects functions is not compatible with wasm.
+# Enable detection and automatic workarounds for that.
+export WASIXCC_AUTOCONF_WORKAROUNDS=yes
+
 # Replace default tools with wasixcc equivalents
 export \
   CC=wasixcc \
@@ -236,14 +240,9 @@ export \
   LD=wasixld \
   AR=wasixar \
   NM=wasixnm \
-  RANLIB=wasixranlib
+  RANLIB=wasixranlib \
 
-# Disable wasm-opt during configuration...
-WASIXCC_RUN_WASM_OPT=no \
-  ./configure ...
-
-# ... but make sure to enable it again during the build, as skipping
-# wasm-opt produces broken binaries in all configurations.
+./configure ...
 make ...
 ```
 
