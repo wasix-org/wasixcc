@@ -562,6 +562,36 @@ mod tests {
     }
 
     #[test]
+    fn test_separate_user_settings_args_does_not_match_compiler_flags() {
+        // Flags like -std=c++20 should NOT be treated as user settings
+        let args = vec![
+            "-std=c++20".to_string(),
+            "-sSYSROOT=/path".to_string(),
+            "-std=c11".to_string(),
+            "-static".to_string(),
+            "-stack-size=1000".to_string(),
+            "-save-temps".to_string(),
+            "file.c".to_string(),
+        ];
+        let (settings, rest) = separate_user_settings_args(args.clone());
+        // Only -sSYSROOT should be a settings arg (starts with -s and has uppercase letter)
+        assert_eq!(settings, vec!["-sSYSROOT=/path".to_string()]);
+        // All other flags should be passed as tool args
+        assert_eq!(
+            rest,
+            vec![
+                "-std=c++20".to_string(),
+                "-std=c11".to_string(),
+                "-static".to_string(),
+                "-stack-size=1000".to_string(),
+                "-save-temps".to_string(),
+                "file.c".to_string(),
+            ]
+        );
+    }
+
+
+    #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
         let args = vec!["-sFOO=bar".to_string()];
         unsafe {
