@@ -261,6 +261,15 @@ The following configuration options are available:");
                            a non-empty list will *override* the default
                            rather than be appended to it. Options must be
                            separated with colons (':').
+  DISCARD_UNSUPPORTED_FLAGS=<BOOL>
+                           Whether to discard unsupported flags passed to
+                           the compiler or linker, such as optimization
+                           flags not supported by the underlying LLVM
+                           toolchain. By default, unknown flags will be passed
+                           through to the underlying tools, which may result
+                           in errors if the flags are not supported.
+                           Setting this option to `yes` will cause some known
+                           unsupported flags and settings to be discarded.
 
 Note: Pass-through options are passed directly to the underlying
 LLVM executables (e.g., clang, wasm-ld, etc.). This is useful for
