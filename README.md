@@ -229,10 +229,6 @@ configuration:
 # Set up wasixcc's settings
 export WASIXCC_XXX=YYY
 
-# The way configure detects functions is not compatible with wasm.
-# Enable detection and automatic workarounds for that.
-export WASIXCC_AUTOCONF_WORKAROUNDS=yes
-
 # Replace default tools with wasixcc equivalents
 export \
   CC=wasixcc \
@@ -242,7 +238,10 @@ export \
   NM=wasixnm \
   RANLIB=wasixranlib \
 
-./configure ...
+# The way configure detects functions is not compatible with wasm.
+# Enable detection and automatic workarounds for that.
+WASIXCC_AUTOCONF_WORKAROUNDS=yes ./configure ...
+
 make ...
 ```
 
