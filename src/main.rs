@@ -386,7 +386,7 @@ fn run() -> Result<()> {
         }
         WasixccCommand::Version => {
             print_version(&exe_name);
-            run_tool()
+            run_tool(&exe_name)
         }
         WasixccCommand::InstallExecutables(path) => install_executables(path),
         WasixccCommand::DownloadSysroot(tag_spec) => wasixcc::download_sysroot(tag_spec),
@@ -399,7 +399,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         WasixccCommand::PrintSysroot => print_sysroot(),
-        WasixccCommand::RunTool => run_tool(),
+        WasixccCommand::RunTool => run_tool(&exe_name),
     }
 }
 
