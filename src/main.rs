@@ -361,6 +361,19 @@ fn get_wasixcc_command(exe_name: &str) -> WasixccCommand {
     WasixccCommand::RunTool
 }
 
+fn run_tool(exe_name: &str) -> Result<()> {
+    let command_name = get_command(&exe_name)?;
+    match command_name.as_str() {
+        "cc" => wasixcc::run_compiler(false),
+        "++" | "cc++" => wasixcc::run_compiler(true),
+        "ld" => wasixcc::run_linker(),
+        "ar" => wasixcc::run_ar(),
+        "nm" => wasixcc::run_nm(),
+        "ranlib" => wasixcc::run_ranlib(),
+        cmd => bail!("Unknown command {cmd}"),
+    }
+}
+
 fn run() -> Result<()> {
     let exe_name = get_executable_name()?;
 
@@ -373,7 +386,7 @@ fn run() -> Result<()> {
         }
         WasixccCommand::Version => {
             print_version(&exe_name);
-            Ok(())
+            run_tool(&exe_name)
         }
         WasixccCommand::InstallExecutables(path) => install_executables(path),
         WasixccCommand::DownloadSysroot(tag_spec) => wasixcc::download_sysroot(tag_spec),
@@ -386,18 +399,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         WasixccCommand::PrintSysroot => print_sysroot(),
-        WasixccCommand::RunTool => {
-            let command_name = get_command(&exe_name)?;
-            match command_name.as_str() {
-                "cc" => wasixcc::run_compiler(false),
-                "++" | "cc++" => wasixcc::run_compiler(true),
-                "ld" => wasixcc::run_linker(),
-                "ar" => wasixcc::run_ar(),
-                "nm" => wasixcc::run_nm(),
-                "ranlib" => wasixcc::run_ranlib(),
-                cmd => bail!("Unknown command {cmd}"),
-            }
-        }
+        WasixccCommand::RunTool => run_tool(&exe_name),
     }
 }
 
