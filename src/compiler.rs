@@ -1602,6 +1602,7 @@ mod tests {
         assert!(msg.contains("Command failed"));
     }
 
+    #[test]
     fn test_should_discard_linker_flag() {
         // Test exact matches
         assert!(should_discard_linker_flag("--end-group"));

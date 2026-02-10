@@ -469,9 +469,9 @@ mod tests {
             "-save-temps".to_string(),
             "file.c".to_string(),
         ];
-        let (settings, rest) = separate_user_settings_args(args.clone());
+        let (settings, rest) = separate_user_settings_from_tool_args(args.clone());
         // Only -sSYSROOT should be a settings arg (starts with -s and has uppercase letter)
-        assert_eq!(settings, vec!["-sSYSROOT=/path".to_string()]);
+        assert_eq!(settings, vec!["SYSROOT=/path".to_string()]);
         // All other flags should be passed as tool args
         assert_eq!(
             rest,
