@@ -293,7 +293,7 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
-        None => false,
+        None => true,
     };
 
     let pic = match try_get_user_setting_value("PIC", args)? {
