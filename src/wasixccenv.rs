@@ -367,6 +367,25 @@ The following configuration options are available:
                            a non-empty list will *override* the default
                            rather than be appended to it. Options must be
                            separated with colons (':').
+  DISCARD_UNSUPPORTED_FLAGS=<BOOL>
+                           Whether to discard unsupported flags passed to
+                           the compiler or linker, such as optimization
+                           flags not supported by the underlying LLVM
+                           toolchain. By default, unknown flags will be passed
+                           through to the underlying tools, which may result
+                           in errors if the flags are not supported.
+                           Setting this option to `yes` will cause some known
+                           unsupported flags and settings to be discarded.
+  AUTOCONF_WORKAROUNDS=<BOOL>
+                           Attempt to detect autoconf tests and run workarounds
+                           to make them behave as intended. conftests for functions
+                           usually check the availability of a function name by calling
+                           it as `int funcname(void);` and testing if the compiler
+                           can compile that. However when targeting WebAssembly you can
+                           only call functions with the correct signature, so such
+                           tests will always fail. Enabling this option will try to
+                           detect such tests and allow the compilation to succeed
+                           even if there is a signature mismatch.
 "#
     );
 }

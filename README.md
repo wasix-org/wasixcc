@@ -122,6 +122,8 @@ Configuration can be set via command line (`-s` flag) or environment variables (
 | `LINK_SYMBOLIC`                 | Enable -Bsymbolic linking (enabled by default)                                                 |
 | `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
 | `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
+| `DISCARD_UNSUPPORTED_FLAGS`     | Some flags that you would use with native tools don't work when targeting WASIX. Discard them. |
+| `AUTOCONF_WORKAROUNDS`          | Attempt to detect autoconf tests and make them work as intended.                               |
 
 ### Environment Variables
 
@@ -232,14 +234,12 @@ export \
   LD=wasixld \
   AR=wasixar \
   NM=wasixnm \
-  RANLIB=wasixranlib
+  RANLIB=wasixranlib \
 
-# Disable wasm-opt during configuration...
-WASIXCC_RUN_WASM_OPT=no \
-  ./configure ...
+# The way configure detects functions is not compatible with wasm.
+# Enable detection and automatic workarounds for that.
+WASIXCC_AUTOCONF_WORKAROUNDS=yes ./configure ...
 
-# ... but make sure to enable it again during the build, as skipping
-# wasm-opt produces broken binaries in all configurations.
 make ...
 ```
 

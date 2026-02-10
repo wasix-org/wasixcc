@@ -112,6 +112,8 @@ pub struct UserSettings {
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
     pub shell_script_wasmer_args: Vec<String>,  // key name: SHELL_SCRIPT_WASMER_ARGS
+    pub discard_unsupported_flags: bool,        // key name: DISCARD_UNSUPPORTED_FLAGS
+    pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
 }
 
 impl UserSettings {
@@ -159,7 +161,11 @@ fn separate_user_settings_from_tool_args(args: Vec<String>) -> (Vec<String>, Vec
     let mut tool_args = Vec::new();
 
     for arg in args {
-        if arg.starts_with("-s") && arg.contains('=') {
+        if arg
+            .strip_prefix("-s")
+            .is_some_and(|rest| rest.starts_with(char::is_uppercase))
+            && arg.contains('=')
+        {
             settings_args.push(arg[2..].to_owned());
         } else {
             tool_args.push(arg);
@@ -314,6 +320,19 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
             None => vec![],
         };
 
+    let discard_unsupported_flags =
+        match try_get_user_setting_value("DISCARD_UNSUPPORTED_FLAGS", args)? {
+            Some(value) => read_bool_user_setting(&value)
+                .with_context(|| format!("Invalid value {value} for DISCARD_UNSUPPORTED_FLAGS"))?,
+            None => false,
+        };
+
+    let autoconf_workarounds = match try_get_user_setting_value("AUTOCONF_WORKAROUNDS", args)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for AUTOCONF_WORKAROUNDS"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -337,6 +356,8 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         link_symbolic,
         generate_shell_script,
         shell_script_wasmer_args,
+        discard_unsupported_flags,
+        autoconf_workarounds,
     })
 }
 
@@ -434,6 +455,35 @@ mod tests {
         let (settings, rest) = separate_user_settings_from_tool_args(args.clone());
         assert_eq!(settings, vec!["A=1".to_string(), "B=2".to_string()]);
         assert_eq!(rest, vec!["-c".to_string(), "file.c".to_string()]);
+    }
+
+    #[test]
+    fn test_separate_user_settings_args_does_not_match_compiler_flags() {
+        // Flags like -std=c++20 should NOT be treated as user settings
+        let args = vec![
+            "-std=c++20".to_string(),
+            "-sSYSROOT=/path".to_string(),
+            "-std=c11".to_string(),
+            "-static".to_string(),
+            "-stack-size=1000".to_string(),
+            "-save-temps".to_string(),
+            "file.c".to_string(),
+        ];
+        let (settings, rest) = separate_user_settings_args(args.clone());
+        // Only -sSYSROOT should be a settings arg (starts with -s and has uppercase letter)
+        assert_eq!(settings, vec!["-sSYSROOT=/path".to_string()]);
+        // All other flags should be passed as tool args
+        assert_eq!(
+            rest,
+            vec![
+                "-std=c++20".to_string(),
+                "-std=c11".to_string(),
+                "-static".to_string(),
+                "-stack-size=1000".to_string(),
+                "-save-temps".to_string(),
+                "file.c".to_string(),
+            ]
+        );
     }
 
     #[test]
