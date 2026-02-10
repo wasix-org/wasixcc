@@ -48,6 +48,7 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-l",
         "-L",
         "-include-pch",
+        "--param",
         "-target",
         "--sysroot",
         "-u",
@@ -67,8 +68,12 @@ static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
 static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-ftls-model", "--sysroot", "--target", "-mthread-model"].into());
 
-static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-o", "-mllvm", "-L", "-l", "-m", "-O", "-y", "-z"].into());
+static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "--export", "-flavor", "-o", "-mllvm", "-L", "-l", "-m", "-O", "-y", "-z",
+    ]
+    .into()
+});
 
 static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-threads",
@@ -166,10 +171,7 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
             "clang"
         }));
         command.args(original_args);
-        command.args([
-            OsStr::new("--target=wasm32-wasi"),
-            OsStr::new("--no-wasm-opt"),
-        ]);
+        command.args([OsStr::new("--target=wasm32-wasi")]);
         return run_command(command);
     }
 
@@ -339,7 +341,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_MMAN"),
         OsStr::new("-D_WASI_EMULATED_SIGNAL"),
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
-        OsStr::new("--no-wasm-opt"),
     ];
 
     if state.user_settings.wasm_exceptions {
@@ -405,6 +406,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
         command.args(&command_args);
         command.args(&state.args.compiler_inputs);
+        command.arg("--no-wasm-opt");
         if let Some(output_path) = state.args.output.as_ref() {
             command.arg("-o").arg(output_path);
         }
