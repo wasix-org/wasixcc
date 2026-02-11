@@ -42,8 +42,8 @@ jobs:
 
     # On musl/arm we can not use js actions, so we download the artifact and clone the repo in the shell
     steps:
-      - name: Try to download bundle
-        id: try-to-download-bundle
+      - name: Download bundle
+        id: download-bundle
         run: |
           case "${{ matrix.name }}" in
             *alpine*)
@@ -96,8 +96,8 @@ jobs:
         uses: ./
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release-base-url: ${{ steps.try-to-download-bundle.outputs.release_base_url }}
-          version: ${{ steps.try-to-download-bundle.outputs.version }}
+          release-base-url: ${{ steps.download-bundle.outputs.release_base_url }}
+          version: ${{ steps.download-bundle.outputs.version }}
 
       - name: Verify wasixcc installation
         run: |

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use crate::{
     args::{UserSettings, gather_user_settings},
@@ -25,13 +25,9 @@ struct Args {
     #[arg(short = 's')]
     // Needed to let clap parse the user settings passed via -sKEY=VALUE
     user_settings: Vec<String>,
-
-    /// Print version information
-    #[arg(short = 'v', long, action = clap::ArgAction::Version)]
-    _version: Option<bool>,
 }
 
-#[derive(Parser)]
+#[derive(Subcommand)]
 enum WasixccCommand {
     /// Install wasixcc executables (via symlinks to this binary) to the
     /// specified path
