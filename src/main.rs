@@ -130,9 +130,7 @@ fn run_ranlib() -> Result<()> {
 }
 
 fn is_version_command() -> bool {
-    std::env::args()
-        .skip(1)
-        .any(|a| a == "-v" || a == "--version")
+    std::env::args().skip(1).any(|a| a == "--version")
 }
 
 fn print_version() {

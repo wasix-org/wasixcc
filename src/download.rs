@@ -4,10 +4,7 @@ use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
 use reqwest::header::HeaderMap;
 
-use crate::{
-    UserSettings,
-    args::{BinaryenLocation, LlvmLocation},
-};
+use crate::args::{BinaryenLocation, LlvmLocation, UserSettings};
 
 const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";

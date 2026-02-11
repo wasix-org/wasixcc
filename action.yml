@@ -56,7 +56,7 @@ inputs:
     description: "Whether to add LLVM toolchain (clang, llvm-ar, etc.) to PATH (true/false)"
     required: false
     default: "false"
-  
+
   release-base-url:
     description: "Base url for wasixcc release tarballs (overrides version input)"
     required: false
@@ -66,6 +66,9 @@ outputs:
   wasixcc-path:
     description: "Path to the wasixcc executable"
     value: ${{ steps.install-wasixcc.outputs.path }}
+  wasixccenv-path:
+    description: "Path to the wasixccenv executable"
+    value: ${{ steps.install-wasixcc.outputs.wasixccenv_path }}
 
 runs:
   using: "composite"
@@ -189,12 +192,13 @@ runs:
         chmod +x "wasixccenv"
         mkdir -p "$WASIXCC_HOME"
         mv wasixccenv "$WASIXCC_HOME/"
-        echo "path=$WASIXCC_HOME/wasixccenv" >> $GITHUB_OUTPUT
+        echo "wasixccenv_path=$WASIXCC_HOME/wasixccenv" >> $GITHUB_OUTPUT
 
         # Install executables (wasix++, wasixar, etc.) to bin directory
         mkdir -p "$WASIXCC_HOME/bin"
         "$WASIXCC_HOME/wasixccenv" install-executables "$WASIXCC_HOME/bin"
         echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
+        echo "path=$WASIXCC_HOME/bin/wasixcc" >> $GITHUB_OUTPUT
 
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'

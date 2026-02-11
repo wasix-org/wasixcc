@@ -156,7 +156,7 @@ pub fn download_binaryen(tag_spec: TagSpec, user_settings: &UserSettings) -> Res
 fn install_executables(path: PathBuf) -> Result<()> {
     #[cfg(not(unix))]
     {
-        bail!("wasixcc only supports installation on unix systems at this time");
+        anyhow::bail!("wasixcc only supports installation on unix systems at this time");
     }
 
     #[cfg(unix)]

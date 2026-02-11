@@ -55,9 +55,9 @@ The installer will install wasixcc and its dependencies to `~/.wasixcc`
   cd wasixcc
   cargo build -r
   # Install executables
-  sudo wasixccenv install-executables /usr/local/bin
+  sudo ./target/release/wasixccenv install-executables /usr/local/bin
   # Download the latest LLVM toolchain, WASIX sysroot, and wasm-opt
-  wasixcc download-all
+  wasixccenv download-all
   ```
 
 </details>
