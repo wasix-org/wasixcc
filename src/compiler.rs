@@ -432,7 +432,9 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
         command.args(&command_args);
         command.args(&state.args.compiler_inputs);
-        command.arg("--no-wasm-opt");
+        if state.user_settings.module_kind().is_binary() {
+            command.arg("--no-wasm-opt");
+        }
         if let Some(output_path) = state.args.output.as_ref() {
             command.arg("-o").arg(output_path);
         }
@@ -980,9 +982,6 @@ fn prepare_compiler_args(
         for arg in &result.linker_args {
             if arg == "-shared" {
                 user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            } else if arg == "-pie" {
-                user_settings.module_kind = Some(ModuleKind::DynamicMain);
                 break;
             }
         }
