@@ -135,17 +135,17 @@ pub(crate) fn run() -> Result<()> {
 
 pub fn download_sysroot(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading sysroot: {:?}", tag_spec);
-    download::download_sysroot(tag_spec, &user_settings)
+    download::download_sysroot(tag_spec, user_settings)
 }
 
 pub fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
-    download::download_llvm(tag_spec, &user_settings)
+    download::download_llvm(tag_spec, user_settings)
 }
 
 pub fn download_binaryen(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading binaryen: {:?}", tag_spec);
-    download::download_binaryen(tag_spec, &user_settings)
+    download::download_binaryen(tag_spec, user_settings)
 }
 
 #[cfg_attr(target_vendor = "wasmer", allow(unused_variables))]
@@ -215,7 +215,7 @@ fn symlink_executable(exe_path: &Path, target: &Path) -> Result<()> {
     unix_fs::symlink(exe_path, target)
         .with_context(|| format!("Failed to create symlink at {target:?}"))?;
     let permissions = unix_fs::PermissionsExt::from_mode(0o755);
-    fs::set_permissions(&target, permissions)
+    fs::set_permissions(target, permissions)
         .with_context(|| format!("Failed to set permissions for {target:?}"))?;
 
     println!("Created command {target:?}");
