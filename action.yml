@@ -1,69 +1,77 @@
-name: 'Setup wasixcc'
-description: 'Setup the wasixcc C/C++ compiler'
-author: 'wasix-org'
+name: "Setup wasixcc"
+description: "Setup the wasixcc C/C++ compiler"
+author: "wasix-org"
 
 branding:
-  icon: 'box'
-  color: 'purple'
+  icon: "box"
+  color: "purple"
 
 inputs:
   version:
-    description: 'Version of wasixcc to install (e.g., v0.2.4, latest). Defaults to latest release.'
+    description: "Version of wasixcc to install (e.g., v0.2.4, latest). Defaults to latest release."
     required: false
-    default: 'latest'
-  
+    default: "latest"
+
   github_token:
-    description: 'GitHub token for API requests and downloads. Pass secrets.GITHUB_TOKEN'
+    description: "GitHub token for API requests and downloads. Pass secrets.GITHUB_TOKEN"
     required: false
-    default: ''
-  
+    default: ""
+
   sysroot-tag:
-    description: 'Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest).'
+    description: "Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest)."
     required: false
-    default: 'latest'
-  
+    default: "latest"
+
   llvm-tag:
-    description: 'Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest).'
+    description: "Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest)."
     required: false
-    default: 'latest'
-  
+    default: "latest"
+
   binaryen-tag:
-    description: 'Tag/version of binaryen to install (e.g., version_118, latest).'
+    description: "Tag/version of binaryen to install (e.g., version_118, latest)."
     required: false
-    default: 'latest'
-  
+    default: "latest"
+
   install-sysroot:
-    description: 'Whether to install the WASIX sysroot (true/false)'
+    description: "Whether to install the WASIX sysroot (true/false)"
     required: false
-    default: 'true'
-  
+    default: "true"
+
   install-llvm:
-    description: 'Whether to install the LLVM toolchain (true/false)'
+    description: "Whether to install the LLVM toolchain (true/false)"
     required: false
-    default: 'true'
-  
+    default: "true"
+
   install-binaryen:
-    description: 'Whether to install binaryen (wasm-opt) (true/false)'
+    description: "Whether to install binaryen (wasm-opt) (true/false)"
     required: false
-    default: 'true'
-  
+    default: "true"
+
   add-binaryen-path:
-    description: 'Whether to add binaryen (wasm-opt) to PATH (true/false)'
+    description: "Whether to add binaryen (wasm-opt) to PATH (true/false)"
     required: false
-    default: 'true'
-  
+    default: "true"
+
   add-llvm-path:
-    description: 'Whether to add LLVM toolchain (clang, llvm-ar, etc.) to PATH (true/false)'
+    description: "Whether to add LLVM toolchain (clang, llvm-ar, etc.) to PATH (true/false)"
     required: false
-    default: 'false'
+    default: "false"
+
+  release-base-url:
+    description: "Base url for wasixcc release tarballs (overrides version input)"
+    required: false
+    default: "https://github.com/wasix-org/wasixcc/releases/download"
 
 outputs:
   wasixcc-path:
-    description: 'Path to the wasixcc executable'
+    description: "Path to the wasixcc executable"
     value: ${{ steps.install-wasixcc.outputs.path }}
+  wasixccenv-path:
+    description: "Path to the wasixccenv executable"
+    value: ${{ steps.install-wasixcc.outputs.wasixccenv_path }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Ensure sed and curl are available
       shell: sh
@@ -83,7 +91,7 @@ runs:
             exit 1
           fi
         fi
-        
+
         if ! command -v sed >/dev/null 2>&1; then
           echo "sed not found, attempting to install..."
           if command -v apk >/dev/null 2>&1; then
@@ -99,20 +107,20 @@ runs:
             exit 1
           fi
         fi
-    
+
     - name: Detect platform
       id: platform
       shell: sh
       run: |
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
         ARCH=$(uname -m)
-        
+
         # Normalize OS
         case "$OS" in linux*) OS="linux";; darwin*) OS="apple";; mingw*|msys*|cygwin*|windows*) OS="windows";; *) echo "Unsupported OS: $OS"; exit 1;; esac
-        
+
         # Normalize architecture
         case "$ARCH" in x86_64|amd64) ARCH="x86_64";; aarch64|arm64) ARCH="aarch64";; *) echo "Unsupported architecture: $ARCH"; exit 1;; esac
-        
+
         # Construct target triple
         if [ "$OS" = "linux" ]; then
           if [ -f /lib/ld-musl-x86_64.so.1 ] || [ -f /lib/ld-musl-aarch64.so.1 ] || (ldd --version 2>&1 | grep -qi musl); then
@@ -126,7 +134,7 @@ runs:
           echo "Warning: Windows builds are not yet available. Please use WSL or a Linux/macOS environment."
           exit 1
         fi
-        
+
         printf "os=%s\n" "$OS" >> $GITHUB_OUTPUT
         printf "arch=%s\n" "$ARCH" >> $GITHUB_OUTPUT
         printf "target=%s\n" "$TARGET" >> $GITHUB_OUTPUT
@@ -160,14 +168,14 @@ runs:
       run: |
         VERSION="${{ steps.resolve-version.outputs.version }}"
         TARGET="${{ steps.platform.outputs.target }}"
-        DOWNLOAD_URL="https://github.com/wasix-org/wasixcc/releases/download/${VERSION}/wasixcc-${TARGET}.tar.gz"
-        
+        DOWNLOAD_URL="${{ inputs.release-base-url }}/${VERSION}/wasixcc-${TARGET}.tar.gz"
+
         if [ -n "$GITHUB_TOKEN" ]; then
           curl -L -H "authorization: Bearer $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
         else
           curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
         fi
-        
+
         if [ ! -f wasixcc.tar.gz ]; then
           echo "Failed to download wasixcc"
           exit 1
@@ -179,17 +187,18 @@ runs:
       run: |
         tar -xzf wasixcc.tar.gz
         rm wasixcc.tar.gz
-        
+
         WASIXCC_HOME="$HOME/.wasixcc"
-        chmod +x "wasixcc"
+        chmod +x "wasixccenv"
         mkdir -p "$WASIXCC_HOME"
-        mv wasixcc "$WASIXCC_HOME/"
-        echo "path=$WASIXCC_HOME/wasixcc" >> $GITHUB_OUTPUT
-        
+        mv wasixccenv "$WASIXCC_HOME/"
+        echo "wasixccenv_path=$WASIXCC_HOME/wasixccenv" >> $GITHUB_OUTPUT
+
         # Install executables (wasix++, wasixar, etc.) to bin directory
         mkdir -p "$WASIXCC_HOME/bin"
-        "$WASIXCC_HOME/wasixcc" --install-executables "$WASIXCC_HOME/bin"
+        "$WASIXCC_HOME/wasixccenv" install-executables "$WASIXCC_HOME/bin"
         echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
+        echo "path=$WASIXCC_HOME/bin/wasixcc" >> $GITHUB_OUTPUT
 
     - name: Install binaryen
       if: inputs.install-binaryen == 'true'
@@ -198,11 +207,11 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         if [ "${{ inputs.binaryen-tag }}" = "latest" ]; then
-          wasixcc --download-binaryen
+          wasixccenv download-binaryen
         else
-          wasixcc --download-binaryen "${{ inputs.binaryen-tag }}"
+          wasixccenv download-binaryen "${{ inputs.binaryen-tag }}"
         fi
-        
+
         if [ "${{ inputs.add-binaryen-path }}" = "true" ]; then
           BINARYEN_BIN="$HOME/.wasixcc/binaryen/bin"
           if [ -d "$BINARYEN_BIN" ]; then
@@ -221,9 +230,9 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         if [ "${{ inputs.sysroot-tag }}" = "latest" ]; then
-          wasixcc --download-sysroot
+          wasixccenv download-sysroot
         else
-          wasixcc --download-sysroot "${{ inputs.sysroot-tag }}"
+          wasixccenv download-sysroot "${{ inputs.sysroot-tag }}"
         fi
 
     - name: Install LLVM toolchain
@@ -233,11 +242,11 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         if [ "${{ inputs.llvm-tag }}" = "latest" ]; then
-          wasixcc --download-llvm
+          wasixccenv download-llvm
         else
-          wasixcc --download-llvm "${{ inputs.llvm-tag }}"
+          wasixccenv download-llvm "${{ inputs.llvm-tag }}"
         fi
-        
+
         if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
           LLVM_BIN="$HOME/.wasixcc/llvm/bin"
           if [ -d "$LLVM_BIN" ]; then
@@ -253,4 +262,4 @@ runs:
       shell: sh
       run: |
         echo "wasixcc version:"
-        wasixcc --version
+        wasixccenv --version

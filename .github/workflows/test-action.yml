@@ -9,9 +9,15 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
+  build-release-bundle:
+    name: Build executables
+    uses: ./.github/workflows/build-release-bundle.yml
+
   test-action:
+    needs: build-release-bundle
     name: Test Action on ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -33,32 +39,77 @@ jobs:
             runner: ubuntu-24.04-arm
             container: alpine:3.23
     container: ${{ matrix.container }}
-    
+
+    # On musl/arm we can not use js actions, so we download the artifact and clone the repo in the shell
     steps:
-      - name: Install git (Alpine only)
-        if: contains(matrix.name, 'alpine')
-        run: apk add --no-cache git
-      
+      - name: Download bundle
+        id: download-bundle
+        run: |
+          case "${{ matrix.name }}" in
+            *alpine*)
+              # curl and unzip are not preinstalled in alpine
+              apk add --no-cache curl unzip
+              ;;
+          esac
+
+          BASE_DIR="$HOME"
+          VERSION="actions"
+          RELEASE_DIR="$BASE_DIR/$VERSION"
+          mkdir $RELEASE_DIR
+          cd $BASE_DIR
+
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -f -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -L -o release-bundle.zip \
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ needs.build-release-bundle.outputs.artifact-id }}/zip"; then
+              break
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Retry $RETRY_COUNT/$MAX_RETRIES failed, waiting 10s..."
+            sleep 10
+          done
+          
+          if [ ! -f release-bundle.zip ]; then
+            echo "Failed to download artifact after $MAX_RETRIES retries"
+            exit 1
+          fi
+
+          unzip release-bundle.zip
+          cd $RELEASE_DIR
+          tar xzf ../release-bundle.tar.gz
+          echo "release_base_url=file://$BASE_DIR" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Clone repository
         run: |
+          case "${{ matrix.name }}" in
+            *alpine*)
+              # git is not preinstalled in alpine
+              apk add --no-cache git
+              ;;
+          esac
           git clone --depth=1 --branch=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} https://github.com/${GITHUB_REPOSITORY}.git .
-      
+
       - name: Setup wasixcc with all components
         uses: ./
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      
+          release-base-url: ${{ steps.download-bundle.outputs.release_base_url }}
+          version: ${{ steps.download-bundle.outputs.version }}
+
       - name: Verify wasixcc installation
         run: |
           echo "Testing wasixcc..."
           wasixcc --version
-          
+
           echo "Testing wasix++..."
           wasix++ --version || echo "wasix++ not found"
-          
+
           echo "Checking sysroot..."
-          wasixcc --print-sysroot
-          
+          wasixccenv print-sysroot
+
           echo "Verifying wasm-opt is in PATH and from wasixcc installation..."
           if command -v wasm-opt >/dev/null 2>&1; then
             WASM_OPT_PATH=$(command -v wasm-opt)
@@ -74,7 +125,7 @@ jobs:
             echo "✗ wasm-opt NOT found in PATH (expected to be available from wasixcc)"
             exit 1
           fi
-          
+
           echo "Verifying clang is NOT in PATH from wasixcc installation..."
           if command -v clang >/dev/null 2>&1; then
             CLANG_PATH=$(command -v clang)
@@ -88,7 +139,7 @@ jobs:
           else
             echo "✓ clang correctly NOT in PATH"
           fi
-      
+
       - name: Create and compile C program
         run: |
           cat > hello.c << 'EOF'
@@ -100,7 +151,7 @@ jobs:
           EOF
           wasixcc hello.c -o hello.wasm
           ls -lh hello.wasm
-      
+
       - name: Create and compile C++ program
         run: |
           cat > hello.cpp << 'EOF'
@@ -112,4 +163,3 @@ jobs:
           EOF
           wasix++ hello.cpp -o hello_cpp.wasm
           ls -lh hello_cpp.wasm
-
