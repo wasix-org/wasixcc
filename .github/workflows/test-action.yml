@@ -63,7 +63,7 @@ jobs:
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             if curl -f -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -L -o release-bundle.zip \
-                "https://api.github.com/repos/wasix-org/wasixcc/actions/artifacts/${{ needs.build-release-bundle.outputs.artifact-id }}/zip"; then
+                "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ needs.build-release-bundle.outputs.artifact-id }}/zip"; then
               break
             fi
             RETRY_COUNT=$((RETRY_COUNT + 1))
