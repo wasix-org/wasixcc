@@ -250,7 +250,11 @@ where to download the sysroot and LLVM toolchain to, as well as when using
 specified first (e.g., 'wasixccenv -sSYSROOT=... download-sysroot').
 
 The following configuration options are available:
-  SYSROOT=<PATH>           Set the sysroot location
+  SYSROOT=<PATH>           Set the sysroot location directly. The sysroot
+                           needs to have the same configuration as expected
+                           by wasixcc. It's *HIGHLY* recommended to use
+                           SYSROOT_PREFIX instead so wasixcc can pick the
+                           sysroot with the correct configuration.
   SYSROOT_PREFIX=<PREFIX>  Set the sysroot prefix, which is expected to
                            contain 3 subdirectories: 'sysroot',
                            'sysroot-eh', and 'sysroot-ehpic'.

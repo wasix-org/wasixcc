@@ -96,11 +96,13 @@ then run the correct tool (`wasixcc`, `wasixar`, etc.).
 
 ### `wasixcc` Configuration Options
 
-Configuration can be set via command line (`-s` flag) or environment variables (`WASIXCC_` prefix):
+Configuration can be set via command line (`-s` flag) or environment variables (`WASIXCC_` prefix).
+You can run `wasixccenv help-config` to see detailed explanation of each flag and what it does. A
+summary is provided here for reference:
 
 | Option                          | Description                                                                                    |
 | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `SYSROOT`                       | Set the sysroot location                                                                       |
+| `SYSROOT`                       | Set the sysroot location - not recommended, use SYSROOT_PREFIX instead where possible          |
 | `SYSROOT_PREFIX`                | Set the sysroot prefix directory                                                               |
 | `LLVM_LOCATION`                 | Set location of LLVM binaries                                                                  |
 | `BINARYEN_LOCATION`             | Set location of wasm-opt                                                                       |
