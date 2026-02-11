@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   verify-version:
@@ -127,6 +128,7 @@ jobs:
 
   build:
     name: Build executables
+    needs: verify-version
     uses: ./.github/workflows/build-release-bundle.yml
 
   publish-crates-io:

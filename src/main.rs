@@ -91,7 +91,11 @@ fn run_compiler(run_cxx: bool) -> Result<()> {
 
     let (args, user_settings) = get_args_and_user_settings()?;
     if is_version_command() {
-        run_tool_with_passthrough_args("clang", args, user_settings)
+        run_tool_with_passthrough_args(
+            if run_cxx { "clang++" } else { "clang" },
+            args,
+            user_settings,
+        )
     } else {
         compiler::run(args, user_settings, run_cxx)
     }
