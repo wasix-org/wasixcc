@@ -129,6 +129,7 @@ jobs:
   build:
     name: Build executables
     needs: verify-version
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/build-release-bundle.yml
 
   publish-crates-io:
