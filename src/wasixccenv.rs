@@ -329,9 +329,17 @@ The following configuration options are available:
                                  which can be loaded by a dynamic main
                            * object-file: An object file
   WASM_EXCEPTIONS=<BOOL>   Whether to enable WebAssembly exception handling
-                           support. This value can be deduced from the
-                           `-fwasm-exceptions`/`-fno-wasm-exceptions` flags
-                           passed to the compiler.
+                           support. The default for this value is `yes`, but
+                           will be deduced to `no` if `-fno-wasm-exceptions`
+                           is passed to the compiler, or to `legacy` if
+                           `-mllvm --wasm-use-legacy-eh=true` is passed to
+                           the compiler or linker. Valid values are:
+                           * yes (default): Enable exception handling support using
+                                 the standardized exnref proposal.
+                           * no: No exception handling support.
+                           * legacy: Enable legacy exception handling support,
+                                 which is compatible with engines that don't
+                                 support the standardized exnref proposal.
   PIC=<BOOL>               Whether to enable position-independent code (PIC),
                            required for dynamic linking. PIC will be enabled
                            if module kind is `dynamic-main` or `shared-library`,

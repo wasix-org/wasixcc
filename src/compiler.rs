@@ -135,6 +135,12 @@ impl ModuleKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExceptionHandlingKind {
+    Exnref,
+    Legacy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptLevel {
     O0,
     O1,
@@ -369,15 +375,38 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
 
-    if state.user_settings.wasm_exceptions {
-        command_args.push(OsStr::new("-fwasm-exceptions"));
-        command_args.push(OsStr::new("-mllvm"));
-        command_args.push(OsStr::new("--wasm-enable-sjlj"));
-        if state.cxx {
-            // Enable C++ exceptions as well
+    match state.user_settings.wasm_exceptions {
+        Some(ExceptionHandlingKind::Exnref) => {
+            command_args.push(OsStr::new("-fwasm-exceptions"));
+
             command_args.push(OsStr::new("-mllvm"));
             command_args.push(OsStr::new("--wasm-enable-eh"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-enable-sjlj"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-use-legacy-eh=false"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--exception-model=wasm"));
         }
+        Some(ExceptionHandlingKind::Legacy) => {
+            command_args.push(OsStr::new("-fwasm-exceptions"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-enable-sjlj"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-use-legacy-eh=true"));
+
+            if state.cxx {
+                // Enable C++ exceptions as well
+                command_args.push(OsStr::new("-mllvm"));
+                command_args.push(OsStr::new("--wasm-enable-eh"));
+            }
+        }
+        None => {}
     }
 
     if state.user_settings.module_kind().requires_pic() || state.user_settings.pic {
@@ -469,11 +498,25 @@ fn link_inputs(state: &State) -> Result<()> {
 
     command.args(&state.user_settings.extra_linker_flags);
 
-    if state.user_settings.wasm_exceptions {
-        command.args(["-mllvm", "--wasm-enable-sjlj"]);
-        if state.cxx {
+    match state.user_settings.wasm_exceptions {
+        Some(ExceptionHandlingKind::Exnref) => {
             command.args(["-mllvm", "--wasm-enable-eh"]);
+            command.args(["-mllvm", "--wasm-enable-sjlj"]);
+            // Don't use legacy EH
+            command.args(["-mllvm", "--wasm-use-legacy-eh=false"]);
+            // Use native wasm exceptions
+            command.args(["-mllvm", "--exception-model=wasm"]);
         }
+        Some(ExceptionHandlingKind::Legacy) => {
+            command.args(["-mllvm", "--wasm-enable-sjlj"]);
+            // Use legacy EH
+            command.args(["-mllvm", "--wasm-use-legacy-eh=true"]);
+
+            if state.cxx {
+                command.args(["-mllvm", "--wasm-enable-eh"]);
+            }
+        }
+        None => {}
     }
 
     let module_kind = state.user_settings.module_kind();
@@ -526,7 +569,7 @@ fn link_inputs(state: &State) -> Result<()> {
 
         if state.cxx || state.user_settings.include_cpp_symbols {
             command.args(["-lc++", "-lc++abi"]);
-            if state.user_settings.wasm_exceptions {
+            if state.user_settings.wasm_exceptions.is_some() {
                 command.arg("-lunwind");
             }
         }
@@ -594,10 +637,17 @@ fn run_wasm_opt(state: &State) -> Result<()> {
     );
 
     if !state.user_settings.wasm_opt_suppress_default {
-        if state.user_settings.wasm_exceptions {
-            command.arg("--emit-exnref");
-        } else {
-            command.arg("--asyncify");
+        match state.user_settings.wasm_exceptions {
+            Some(ExceptionHandlingKind::Exnref) => {
+                // No conversion to exnref needed
+            }
+            Some(ExceptionHandlingKind::Legacy) => {
+                // Convert old eh to new exnref
+                command.arg("--emit-exnref");
+            }
+            None => {
+                command.arg("--asyncify");
+            }
         }
 
         if !state
@@ -1106,10 +1156,18 @@ fn update_build_settings_from_arg(
         };
         Ok(true)
     } else if arg == "-fwasm-exceptions" {
-        user_settings.wasm_exceptions = true;
+        user_settings.wasm_exceptions = match user_settings.wasm_exceptions {
+            Some(ExceptionHandlingKind::Legacy) => Some(ExceptionHandlingKind::Legacy),
+            Some(ExceptionHandlingKind::Exnref) | None => Some(ExceptionHandlingKind::Exnref),
+        };
         Ok(false)
     } else if arg == "-fno-wasm-exceptions" {
-        user_settings.wasm_exceptions = false;
+        user_settings.wasm_exceptions = None;
+        Ok(true)
+    } else if arg.contains("--wasm-use-legacy-eh=true") {
+        // This is a heuristic to detect --wasm-use-legacy-eh=true even when it is passed via -mllvm or -Wl,-mllvm. It's not perfect but should work in most cases.
+        // This is also a heuristic because toggling eh off and on after this will reset it to new eh...
+        user_settings.wasm_exceptions = Some(ExceptionHandlingKind::Legacy);
         Ok(true)
     } else if arg == "-fPIC" {
         user_settings.pic = true;
@@ -1183,9 +1241,44 @@ mod tests {
         assert_eq!(bs.debug_level, DebugLevel::G1);
         assert!(!update_build_settings_from_arg("--no-wasm-opt", &mut bs, &mut us).unwrap());
         assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
-        assert!(us.wasm_exceptions);
+        assert_eq!(us.wasm_exceptions, Some(ExceptionHandlingKind::Exnref));
         assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
-        assert!(!us.wasm_exceptions);
+        assert_eq!(us.wasm_exceptions, None);
+        us = UserSettings::default();
+        assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
+        assert!(
+            update_build_settings_from_arg(
+                "-Wl,-mllvm,--wasm-use-legacy-eh=true",
+                &mut bs,
+                &mut us
+            )
+            .unwrap()
+        );
+        assert_eq!(us.wasm_exceptions, Some(ExceptionHandlingKind::Legacy));
+        us = UserSettings::default();
+        assert!(
+            update_build_settings_from_arg(
+                "-Wl,-mllvm,--wasm-use-legacy-eh=true",
+                &mut bs,
+                &mut us
+            )
+            .unwrap()
+        );
+        assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
+        assert_eq!(us.wasm_exceptions, None);
+
+        // // TODO: Does not pass, because the deduction logic is not perfect as we can't store if we are using legacy EH or not when no EH is enabled.
+        // us = UserSettings::default();
+        // assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
+        // assert!(
+        //     update_build_settings_from_arg(
+        //         "-Wl,-mllvm,--wasm-use-legacy-eh=true",
+        //         &mut bs,
+        //         &mut us
+        //     )
+        //     .unwrap()
+        // );
+        // assert_eq!(us.wasm_exceptions, None);
     }
 
     #[test]
@@ -1210,7 +1303,7 @@ mod tests {
         assert_eq!(bs.opt_level, OptLevel::O2);
         assert_eq!(bs.debug_level, DebugLevel::G0);
         assert!(!bs.use_wasm_opt);
-        assert!(us.wasm_exceptions);
+        assert_eq!(us.wasm_exceptions, Some(ExceptionHandlingKind::Exnref));
         assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
         assert_eq!(
             pa.linker_args,
@@ -1263,19 +1356,19 @@ mod tests {
             PathBuf::from("/xxx/sysroot")
         );
 
-        us.wasm_exceptions = true;
+        us.wasm_exceptions = Some(ExceptionHandlingKind::Exnref);
         assert_eq!(
             us.sysroot_location().unwrap(),
-            PathBuf::from("/xxx/sysroot-eh")
+            PathBuf::from("/xxx/sysroot-exnref-eh")
         );
 
         us.pic = true;
         assert_eq!(
             us.sysroot_location().unwrap(),
-            PathBuf::from("/xxx/sysroot-ehpic")
+            PathBuf::from("/xxx/sysroot-exnref-ehpic")
         );
 
-        us.wasm_exceptions = false;
+        us.wasm_exceptions = None;
         assert!(us.sysroot_location().is_err());
 
         us.sysroot_location = Some(PathBuf::from("/yyy"));

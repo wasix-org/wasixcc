@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use crate::compiler::ModuleKind;
+use crate::compiler::{ExceptionHandlingKind, ModuleKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlvmLocation {
@@ -107,7 +107,7 @@ pub struct UserSettings {
     pub wasm_opt_suppress_default: bool,        // key name: WASM_OPT_SUPPRESS_DEFAULT
     pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
     pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
-    pub wasm_exceptions: bool,                  // key name: WASM_EXCEPTIONS
+    pub wasm_exceptions: Option<ExceptionHandlingKind>, // key name: WASM_EXCEPTIONS
     pub pic: bool,                              // key name: PIC
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
@@ -122,12 +122,22 @@ impl UserSettings {
             Ok(sysroot.to_owned())
         } else {
             match (self.wasm_exceptions, self.pic) {
-                (true, true) => Ok(self.sysroot_prefix.join("sysroot-ehpic")),
-                (true, false) => Ok(self.sysroot_prefix.join("sysroot-eh")),
-                (false, true) => {
+                (Some(ExceptionHandlingKind::Legacy), true) => {
+                    Ok(self.sysroot_prefix.join("sysroot-ehpic"))
+                }
+                (Some(ExceptionHandlingKind::Legacy), false) => {
+                    Ok(self.sysroot_prefix.join("sysroot-eh"))
+                }
+                (Some(ExceptionHandlingKind::Exnref), true) => {
+                    Ok(self.sysroot_prefix.join("sysroot-exnref-ehpic"))
+                }
+                (Some(ExceptionHandlingKind::Exnref), false) => {
+                    Ok(self.sysroot_prefix.join("sysroot-exnref-eh"))
+                }
+                (None, true) => {
                     bail!("PIC without wasm exceptions is not a valid build configuration")
                 }
-                (false, false) => Ok(self.sysroot_prefix.join("sysroot")),
+                (None, false) => Ok(self.sysroot_prefix.join("sysroot")),
             }
         }
     }
@@ -290,10 +300,18 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => None, // Default to static main
     };
 
-    let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)? {
-        Some(value) => read_bool_user_setting(&value)
-            .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
-        None => true,
+    let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
+        Some("legacy") => Some(ExceptionHandlingKind::Legacy),
+        Some(value) => {
+            if read_bool_user_setting(value)
+                .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?
+            {
+                Some(ExceptionHandlingKind::Exnref)
+            } else {
+                None
+            }
+        }
+        None => Some(ExceptionHandlingKind::Exnref),
     };
 
     let pic = match try_get_user_setting_value("PIC", args)? {
@@ -534,7 +552,10 @@ mod tests {
             vec!["m".to_string(), "n".to_string()]
         );
         assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
-        assert!(settings.wasm_exceptions);
+        assert_eq!(
+            settings.wasm_exceptions,
+            Some(ExceptionHandlingKind::Exnref)
+        );
         assert!(!settings.pic);
     }
 }
