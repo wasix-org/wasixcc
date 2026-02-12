@@ -249,7 +249,8 @@ The following configuration options are available:
                            SYSROOT_PREFIX instead so wasixcc can pick the
                            sysroot with the correct configuration.
   SYSROOT_PREFIX=<PREFIX>  Set the sysroot prefix, which is expected to
-                           contain 3 subdirectories: 'sysroot',
+                           contain 5 subdirectories: 'sysroot',
+                           'sysroot-exnref-eh', and 'sysroot-exnref-ehpic',
                            'sysroot-eh', and 'sysroot-ehpic'.
   LLVM_LOCATION=<PATH>     Set the location of LLVM toolchain which will be
                            invoked without a version suffix. The path must

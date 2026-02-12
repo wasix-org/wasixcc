@@ -154,6 +154,8 @@ pub(crate) fn download_sysroot(
         "sysroot.tar.gz",
         "sysroot-eh.tar.gz",
         "sysroot-ehpic.tar.gz",
+        "sysroot-exnref-eh.tar.gz",
+        "sysroot-exnref-ehpic.tar.gz",
     ] {
         let asset = release
             .assets
