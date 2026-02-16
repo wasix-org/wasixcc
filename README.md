@@ -62,6 +62,46 @@ The installer will install wasixcc and its dependencies to `~/.wasixcc`
 
 </details>
 
+### Nix Flake
+
+This repository includes a `flake.nix` that provides a ready-to-use `wasixcc`
+toolchain with pinned:
+
+- custom WASIX LLVM (`wasix-org/llvm-project`)
+- Binaryen (`wasm-opt`)
+- WASIX sysroot (`sysroot`, `sysroot-eh`, `sysroot-ehpic`)
+
+Usage:
+
+```sh
+# Run wasixcc directly from the repo
+nix run github:wasix-org/wasixcc#wasixcc -- --version
+
+# Enter a shell with wasixcc on PATH from the repo
+nix develop github:wasix-org/wasixcc
+wasixcc --version
+```
+
+Current flake support: `x86_64-linux`.
+
+#### Updating pinned LLVM hashes
+
+When updating the pinned WASIX LLVM release in `flake.nix`, update both the
+versioned URL and the `hash` value.
+
+Example workflow:
+
+```sh
+# 1) Check latest LLVM release tag
+curl -fsSL https://api.github.com/repos/wasix-org/llvm-project/releases/latest | jq -r .tag_name
+
+# 2) Prefetch the x86_64 Linux archive to get the Nix hash
+nix store prefetch-file --json \
+  https://github.com/wasix-org/llvm-project/releases/download/<TAG>/LLVM-Linux-x86_64.tar.gz
+
+# 3) Copy the returned "hash" into flake.nix and update the URL/tag there
+```
+
 ### GitHub Actions
 
 To use `wasixcc` in your GitHub Action use the following snippet
