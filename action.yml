@@ -171,9 +171,19 @@ runs:
         DOWNLOAD_URL="${{ inputs.release-base-url }}/${VERSION}/wasixcc-${TARGET}.tar.gz"
 
         if [ -n "$GITHUB_TOKEN" ]; then
-          curl -L -H "authorization: Bearer $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"
+          if ! curl -f -L -H "authorization: Bearer $GITHUB_TOKEN" -o wasixcc.tar.gz "$DOWNLOAD_URL"; then
+            echo "Error: Failed to download wasixcc version '${VERSION}' for target '${TARGET}'"
+            echo "URL: ${DOWNLOAD_URL}"
+            echo "Please verify that the version exists and the target platform is supported."
+            exit 1
+          fi
         else
-          curl -L -o wasixcc.tar.gz "$DOWNLOAD_URL"
+          if ! curl -f -L -o wasixcc.tar.gz "$DOWNLOAD_URL"; then
+            echo "Error: Failed to download wasixcc version '${VERSION}' for target '${TARGET}'"
+            echo "URL: ${DOWNLOAD_URL}"
+            echo "Please verify that the version exists and the target platform is supported."
+            exit 1
+          fi
         fi
 
         if [ ! -f wasixcc.tar.gz ]; then
