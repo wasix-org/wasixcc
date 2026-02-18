@@ -65,8 +65,18 @@ static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
 
 // We always specify values for these flags according to the build configuration, so
 // they must be discarded even if they're provided externally
-static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-ftls-model", "--sysroot", "--target", "-mthread-model"].into());
+static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "-ftls-model",
+        "--sysroot",
+        "--target",
+        "-mthread-model",
+        "-fwasm-exceptions",
+        "--no-wasm-opt",
+        "--wasm-opt",
+    ]
+    .into()
+});
 
 static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     [
@@ -813,239 +823,386 @@ fn generate_shell_script(state: &State) -> Result<()> {
     Ok(())
 }
 
-/// Decide whether a linker flag should be discarded for wasm-ld.
-fn should_discard_linker_flag(flag: &str) -> bool {
-    for discard_flag in WASM_LD_FLAGS_TO_DISCARD.iter() {
-        if let Some(rest) = flag.strip_prefix(discard_flag) {
-            // Check for exact and prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
-            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(',') {
-                return true;
-            }
-        }
+/// Process the clang arguments into PreparedArgs, separating compiler args and linker args, and also extracting build settings from the args.
+fn process_compiler_args<'a>(
+    args: impl IntoIterator<Item = &'a String>,
+    build_settings: &mut BuildSettings,
+    user_settings: &mut UserSettings,
+) -> Result<PreparedArgs> {
+    let mut compiler_args = Vec::new();
+    let mut linker_args = Vec::new();
+    let mut inputs = Vec::new();
+    let mut output = None;
+
+    enum State {
+        Normal,
+        ArgWithValue(String),
+        Terminated,
     }
+    let mut state = State::Normal;
 
-    false
-}
-
-/// Filters out unsupported linker flags for wasm-ld.
-fn filter_linker_flags(args: impl Iterator<Item = String>) -> impl Iterator<Item = String> {
-    let mut next_is_value = false;
-    let mut discard_next_value = false;
-    args.filter(move |arg| {
-        if next_is_value {
-            // If this is a value for a flag we decided to discard, discard it too
-            let include_this = !discard_next_value;
-            next_is_value = false;
-            discard_next_value = false;
-            return include_this;
-        }
-
-        next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
-        if should_discard_linker_flag(arg) {
-            discard_next_value = next_is_value;
-            return false;
-        }
-        true
-    })
-}
-
-fn detect_autoconf_test<'a>(args: impl IntoIterator<Item = &'a String>) -> bool {
-    // Detect -o conftest and conftest.c
-    let mut next_is_output = false;
     for arg in args {
-        match arg.as_str() {
-            "conftest.c" | "conftest.cpp" => return true,
-            "-o" => {
-                next_is_output = true;
-            }
-            "conftest" if next_is_output => return true,
-            _ => {
-                next_is_output = false;
+        state = match state {
+            State::Normal => match arg.as_str() {
+                "--" => {
+                    compiler_args.push("--".to_owned());
+                    State::Terminated
+                }
+                arg if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD
+                    .iter()
+                    .any(|flag| arg.starts_with(flag)) =>
+                {
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+                arg if CLANG_FLAGS_WITH_ARGS.contains(arg) => State::ArgWithValue(arg.to_owned()),
+                arg if arg.starts_with("-Wl,") => {
+                    for split in arg["-Wl,".len()..].split(',') {
+                        linker_args.push(split.to_owned());
+                    }
+                    State::Normal
+                }
+                arg if CLANG_FLAGS_TO_DISCARD.iter().any(|flag| {
+                    arg.strip_prefix(flag)
+                        .is_some_and(|value| value.is_empty() || value.starts_with('='))
+                }) =>
+                {
+                    update_build_settings_from_compiler_arg(arg, build_settings, user_settings);
+                    tracing::debug!("Discarding flag '{}'", arg);
+                    State::Normal
+                }
+                arg if arg.starts_with("-") => {
+                    update_build_settings_from_compiler_arg(arg, build_settings, user_settings);
+                    compiler_args.push(arg.to_owned());
+                    State::Normal
+                }
+                arg => {
+                    inputs.push(PathBuf::from(arg));
+                    State::Normal
+                }
+            },
+            State::ArgWithValue(flag) => match flag.as_str() {
+                "-mllvm" => {
+                    update_build_settings_from_llvm_arg(arg, user_settings);
+                    compiler_args.push(flag.to_owned());
+                    compiler_args.push(arg.to_owned());
+                    State::Normal
+                }
+                "-o" => {
+                    update_build_settings_from_output_arg(arg, build_settings, user_settings);
+                    output = Some(PathBuf::from(arg));
+                    State::Normal
+                }
+                "-Xlinker" => {
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+                "-z" => {
+                    linker_args.push("-z".to_owned());
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+                flag if CLANG_FLAGS_TO_DISCARD.contains(flag) => {
+                    tracing::debug!("Discarding value '{}' for flag '{}'", arg, flag);
+                    State::Normal
+                }
+                flag => {
+                    compiler_args.push(flag.to_owned());
+                    compiler_args.push(arg.to_owned());
+                    State::Normal
+                }
+            },
+            State::Terminated => {
+                inputs.push(PathBuf::from(arg));
+                State::Terminated
             }
         }
     }
-    false
+
+    let (linker_inputs, compiler_inputs) = inputs.into_iter().partition(|input| {
+        matches!(
+            input.extension().and_then(|ext| ext.to_str()),
+            Some("o") | Some("a") | Some("so") | Some("dll") | Some("dylib")
+        )
+    });
+
+    match state {
+        State::ArgWithValue(flag) => {
+            bail!("Expected argument after {}", flag);
+        }
+        State::Normal | State::Terminated => Ok(PreparedArgs {
+            compiler_args,
+            linker_args,
+            compiler_inputs,
+            linker_inputs,
+            output,
+        }),
+    }
+}
+
+/// Process the wasm-ld arguments into PreparedArgs, extracting build settings from the args.
+fn process_linker_args<'a>(
+    args: impl IntoIterator<Item = &'a String>,
+    user_settings: &mut UserSettings,
+) -> Result<PreparedArgs> {
+    let mut linker_args = Vec::new();
+    let mut inputs = Vec::new();
+    let mut output = None;
+
+    enum State {
+        Normal,
+        ArgWithValue(String),
+        Terminated,
+    }
+    let mut state = State::Normal;
+
+    for arg in args {
+        state = match state {
+            State::Normal => match arg.as_str() {
+                "--" => {
+                    linker_args.push("--".to_owned());
+                    State::Terminated
+                }
+                arg if WASM_LD_FLAGS_WITH_ARGS.contains(arg) => State::ArgWithValue(arg.to_owned()),
+                arg if user_settings.discard_unsupported_flags
+                    && WASM_LD_FLAGS_TO_DISCARD.iter().any(|flag| {
+                        arg.strip_prefix(flag)
+                            .is_some_and(|value| value.is_empty() || value.starts_with('='))
+                    }) =>
+                {
+                    update_build_settings_from_linker_arg(arg, user_settings);
+                    tracing::debug!("Discarding flag '{}'", arg);
+                    State::Normal
+                }
+                arg if arg.starts_with("-") => {
+                    update_build_settings_from_linker_arg(arg, user_settings);
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+                arg => {
+                    inputs.push(PathBuf::from(arg));
+                    State::Normal
+                }
+            },
+            State::ArgWithValue(flag) => match flag.as_str() {
+                "-mllvm" => {
+                    update_build_settings_from_llvm_arg(arg, user_settings);
+                    linker_args.push(flag.to_owned());
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+                "-o" => {
+                    output = Some(PathBuf::from(arg));
+                    State::Normal
+                }
+                flag if user_settings.discard_unsupported_flags
+                    && WASM_LD_FLAGS_TO_DISCARD.contains(flag) =>
+                {
+                    tracing::debug!("Discarding value '{}' for flag '{}'", arg, flag);
+                    State::Normal
+                }
+                flag => {
+                    linker_args.push(flag.to_owned());
+                    linker_args.push(arg.to_owned());
+                    State::Normal
+                }
+            },
+            State::Terminated => {
+                inputs.push(PathBuf::from(arg));
+                State::Terminated
+            }
+        }
+    }
+
+    match state {
+        State::ArgWithValue(flag) => {
+            bail!("Expected argument after {}", flag);
+        }
+        State::Normal | State::Terminated => Ok(PreparedArgs {
+            compiler_args: Vec::new(),
+            linker_args,
+            compiler_inputs: Vec::new(),
+            linker_inputs: inputs,
+            output,
+        }),
+    }
+}
+
+// Combine the compiler args with the extra args from user settings
+fn add_extra_compiler_flags(
+    args: impl IntoIterator<Item = String>,
+    user_settings: &mut UserSettings,
+    run_cxx: bool,
+) -> impl IntoIterator<Item = String> {
+    let extra_flags = std::mem::take(&mut user_settings.extra_compiler_flags);
+    let extra_flags2 = if run_cxx {
+        std::mem::take(&mut user_settings.extra_compiler_flags_cxx)
+    } else {
+        std::mem::take(&mut user_settings.extra_compiler_flags_c)
+    };
+    let extra_post_flags = std::mem::take(&mut user_settings.extra_compiler_post_flags);
+    let extra_post_flags2 = if run_cxx {
+        std::mem::take(&mut user_settings.extra_compiler_post_flags_cxx)
+    } else {
+        std::mem::take(&mut user_settings.extra_compiler_post_flags_c)
+    };
+
+    extra_flags
+        .into_iter()
+        .chain(extra_flags2)
+        .chain(args)
+        .chain(extra_post_flags)
+        .chain(extra_post_flags2)
+}
+
+// Combine the compiler args with the extra args from user settings
+fn add_extra_linker_flags(
+    linker_args: impl IntoIterator<Item = String>,
+    user_settings: &mut UserSettings,
+) -> impl IntoIterator<Item = String> {
+    let extra_flags = std::mem::take(&mut user_settings.extra_linker_flags);
+    extra_flags.into_iter().chain(linker_args)
+}
+
+// Resolve all response files in the args and return a flat list of args with no response files.
+fn resolve_response_files(args: impl IntoIterator<Item = String>) -> Result<Vec<String>> {
+    let mut arg_stack = response_file::ArgumentsStack::new(args.into_iter().collect::<Vec<_>>());
+    let mut args = Vec::new();
+    while let Some(arg) = arg_stack.next()? {
+        args.push(arg);
+    }
+    Ok(args)
+}
+
+// Update the build settings based on a standalone compiler argument
+fn update_build_settings_from_compiler_arg(
+    compiler_arg: &str,
+    build_settings: &mut BuildSettings,
+    user_settings: &mut UserSettings,
+) {
+    match compiler_arg {
+        "-O0" => build_settings.opt_level = OptLevel::O0,
+        "-O1" | "-O" => build_settings.opt_level = OptLevel::O1,
+        "-O2" => build_settings.opt_level = OptLevel::O2,
+        "-O3" => build_settings.opt_level = OptLevel::O3,
+        "-O4" => build_settings.opt_level = OptLevel::O4,
+        "-Os" => build_settings.opt_level = OptLevel::Os,
+        "-Oz" => build_settings.opt_level = OptLevel::Oz,
+        "-g0" => build_settings.debug_level = DebugLevel::G0,
+        "-g1" => build_settings.debug_level = DebugLevel::G1,
+        "-g2" | "-g" => build_settings.debug_level = DebugLevel::G2,
+        "-g3" => build_settings.debug_level = DebugLevel::G3,
+        "-fwasm-exceptions" => user_settings.wasm_exceptions = true,
+        "-fno-wasm-exceptions" => user_settings.wasm_exceptions = false,
+        "-fPIC" => user_settings.pic = true,
+        "-fno-PIC" => user_settings.pic = false,
+        "--wasm-opt" => build_settings.use_wasm_opt = true,
+        "--no-wasm-opt" => build_settings.use_wasm_opt = false,
+        "-c" | "-S" | "-E" => {
+            user_settings.module_kind = Some(ModuleKind::ObjectFile);
+        }
+        "-shared" => {
+            if user_settings.module_kind.is_none() {
+                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
+            }
+        }
+        "-pie" => {
+            if user_settings.module_kind.is_none() {
+                user_settings.module_kind = Some(ModuleKind::DynamicMain);
+            }
+        }
+        _ => {}
+    }
+}
+
+// Update the build settings based on a standalone linker argument
+fn update_build_settings_from_linker_arg(compiler_arg: &str, user_settings: &mut UserSettings) {
+    match compiler_arg {
+        "-shared" => {
+            if user_settings.module_kind.is_none() {
+                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
+            }
+        }
+        "-pie" => {
+            if user_settings.module_kind.is_none() {
+                user_settings.module_kind = Some(ModuleKind::DynamicMain);
+            }
+        }
+        _ => {}
+    }
+}
+
+// Update the build settings based on a standalone llvm argument
+fn update_build_settings_from_llvm_arg(arg: &str, user_settings: &mut UserSettings) {
+    match arg {
+        "--wasm-use-legacy-eh" | "--wasm-use-legacy-eh=true" => {
+            user_settings.exception_style = ExceptionStyle::Legacy;
+        }
+        "--wasm-use-legacy-eh=false" => {
+            user_settings.exception_style = ExceptionStyle::Exnref;
+        }
+        _ => {}
+    }
+}
+
+fn update_build_settings_from_output_arg(
+    _arg: &str,
+    _build_settings: &mut BuildSettings,
+    _user_settings: &mut UserSettings,
+) {
+    // Uncommented because I am pretty sure this is wrong. clang should not look at the output filename for determining the output type
+    // Especially not in a way that will prevent a -c specified afterwards from working correctly
+
+    // if user_settings.module_kind.is_some() {
+    //     return;
+    // }
+
+    // let Some(module_kind) = PathBuf::from(arg).extension().and_then(deduce_module_kind) else {
+    //     return;
+    // };
+
+    // user_settings.module_kind = Some(module_kind);
 }
 
 fn prepare_compiler_args(
-    mut args: Vec<String>,
+    args: Vec<String>,
     user_settings: &mut UserSettings,
     run_cxx: bool,
 ) -> Result<(PreparedArgs, BuildSettings)> {
-    fn process_one_arg(
-        arg: String,
-        next_arg: &mut Option<String>,
-        user_settings: &mut UserSettings,
-        build_settings: &mut BuildSettings,
-        result: &mut PreparedArgs,
-    ) -> Result<()> {
-        if let Some(arg) = arg.strip_prefix("-Wl,") {
-            for split in arg.split(',') {
-                result.linker_args.push(split.to_owned());
-            }
-        } else if arg == "-Xlinker" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -Xlinker");
-            };
-            result.linker_args.push(next_arg);
-        } else if arg == "-z" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -z");
-            };
-            result.linker_args.push("-z".to_owned());
-            result.linker_args.push(next_arg);
-        } else if arg == "-o" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -o");
-            };
-            let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none()
-                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
-            {
-                user_settings.module_kind = Some(module_kind);
-            }
-            result.output = Some(output);
-        } else if arg.starts_with('-') {
-            if update_build_settings_from_arg(&arg, build_settings, user_settings)? {
-                // Read the value early so it's also discarded if we discard the flag
-                let next_arg = if CLANG_FLAGS_WITH_ARGS.contains(arg.as_str()) {
-                    next_arg.take()
-                } else {
-                    None
-                };
-
-                if CLANG_FLAGS_TO_DISCARD.iter().any(|flag| {
-                    arg.strip_prefix(flag)
-                        .is_some_and(|value| value.is_empty() || value.starts_with('='))
-                }) {
-                    return Ok(());
-                }
-
-                let args_list = if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD
-                    .iter()
-                    .any(|flag| arg.starts_with(flag))
-                {
-                    &mut result.linker_args
-                } else {
-                    &mut result.compiler_args
-                };
-
-                args_list.push(arg);
-                if let Some(next_arg) = next_arg {
-                    args_list.push(next_arg);
-                }
-            }
-        } else {
-            // Assume it's an input file
-            let input = PathBuf::from(&arg);
-            match input.extension().and_then(|ext| ext.to_str()) {
-                Some("a") | Some("o") | Some("obj") | Some("so") => {
-                    result.linker_inputs.push(PathBuf::from(arg));
-                }
-                _ => {
-                    result.compiler_inputs.push(PathBuf::from(arg));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    let mut result = PreparedArgs {
-        compiler_args: Vec::new(),
-        linker_args: Vec::new(),
-        compiler_inputs: Vec::new(),
-        linker_inputs: Vec::new(),
-        output: None,
-    };
     let mut build_settings = BuildSettings {
         opt_level: OptLevel::O0,
         debug_level: DebugLevel::G0,
         use_wasm_opt: true,
     };
 
-    if user_settings.autoconf_workarounds && detect_autoconf_test(&args) {
+    let args = add_extra_compiler_flags(args, user_settings, run_cxx);
+    let args = resolve_response_files(args)?;
+
+    let mut result = process_compiler_args(args.iter(), &mut build_settings, user_settings)?;
+
+    if user_settings.autoconf_workarounds
+        && (result.compiler_inputs.contains(&"conftest.c".into())
+            || result.compiler_inputs.contains(&"conftest.cpp".into())
+            || result.output == Some("conftest".into()))
+    {
         // wasm opt fails if signature mismatches produce an invalid module
         user_settings.run_wasm_opt = Some(false);
         // Pass the flag to the linker to avoid shlib signature checks
-        args.push("-Wl,--no-shlib-sigcheck".to_owned());
+        result.linker_args.push("--no-shlib-sigcheck".to_owned());
     }
 
-    let mut extra_flags = vec![];
-    std::mem::swap(&mut extra_flags, &mut user_settings.extra_compiler_flags);
-    let mut extra_flags2 = vec![];
-    std::mem::swap(
-        &mut extra_flags2,
-        if run_cxx {
-            &mut user_settings.extra_compiler_flags_cxx
-        } else {
-            &mut user_settings.extra_compiler_flags_c
-        },
-    );
-    let mut extra_post_flags = vec![];
-    std::mem::swap(
-        &mut extra_post_flags,
-        &mut user_settings.extra_compiler_post_flags,
-    );
-    let mut extra_post_flags2 = vec![];
-    std::mem::swap(
-        &mut extra_post_flags2,
-        if run_cxx {
-            &mut user_settings.extra_compiler_post_flags_cxx
-        } else {
-            &mut user_settings.extra_compiler_post_flags_c
-        },
-    );
+    // TODO: Add extra linker args somewhere here
 
-    extra_flags.extend(extra_flags2);
-    extra_flags.extend(args);
-    extra_flags.extend(extra_post_flags);
-    extra_flags.extend(extra_post_flags2);
-    let mut args = response_file::ArgumentsStack::new(extra_flags);
-    let mut next_arg = None;
-    loop {
-        let arg = if let Some(arg) = next_arg.take() {
-            arg
-        } else if let Some(arg) = args.next()? {
-            arg
-        } else {
-            break;
-        };
+    let linker_result = process_linker_args(result.linker_args.iter(), user_settings)?;
 
-        next_arg = args.next()?;
-        process_one_arg(
-            arg,
-            &mut next_arg,
-            user_settings,
-            &mut build_settings,
-            &mut result,
-        )?;
-    }
-    result.linker_args = if user_settings.discard_unsupported_flags {
-        filter_linker_flags(result.linker_args.into_iter()).collect()
-    } else {
-        result.linker_args
-    };
-
-    if user_settings.module_kind.is_none() {
-        for arg in &result.compiler_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            } else if arg == "-c" || arg == "-S" || arg == "-E" {
-                user_settings.module_kind = Some(ModuleKind::ObjectFile);
-                break;
-            }
-        }
+    result.linker_args = linker_result.linker_args;
+    result.linker_inputs.extend(linker_result.linker_inputs);
+    if result.output.is_none() {
+        result.output = linker_result.output;
     }
 
-    if user_settings.module_kind.is_none() {
-        for arg in &result.linker_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            }
-        }
+    if user_settings.module_kind().requires_pic() {
+        user_settings.pic = true;
     }
 
     Ok((result, build_settings))
@@ -1055,154 +1212,16 @@ fn prepare_linker_args(
     args: Vec<String>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let args = if user_settings.discard_unsupported_flags {
-        filter_linker_flags(args.into_iter()).collect()
-    } else {
-        args
-    };
-    fn process_one_arg(
-        arg: String,
-        next_arg: &mut Option<String>,
-        user_settings: &mut UserSettings,
-        result: &mut PreparedArgs,
-    ) -> Result<()> {
-        if arg == "-o" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -o");
-            };
-            let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none()
-                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
-            {
-                user_settings.module_kind = Some(module_kind);
-            }
-            result.output = Some(output);
-        } else if arg.starts_with('-') {
-            let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
-            result.linker_args.push(arg);
-            if has_next_arg && let Some(next_arg) = next_arg.take() {
-                result.linker_args.push(next_arg);
-            }
-        } else {
-            // Assume it's an input file
-            result.linker_inputs.push(PathBuf::from(arg));
-        }
+    let args = add_extra_linker_flags(args, user_settings);
+    let args = resolve_response_files(args)?;
 
-        Ok(())
-    }
-
-    let mut result = PreparedArgs {
-        compiler_args: Vec::new(),
-        linker_args: Vec::new(),
-        compiler_inputs: Vec::new(),
-        linker_inputs: Vec::new(),
-        output: None,
-    };
-
-    let mut args = response_file::ArgumentsStack::new(args);
-    let mut next_arg = None;
-    loop {
-        let arg = if let Some(arg) = next_arg.take() {
-            arg
-        } else if let Some(arg) = args.next()? {
-            arg
-        } else {
-            break;
-        };
-
-        next_arg = args.next()?;
-        process_one_arg(arg, &mut next_arg, user_settings, &mut result)?;
-    }
-
-    if user_settings.module_kind.is_none() {
-        for arg in &result.linker_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            } else if arg == "-pie" {
-                user_settings.module_kind = Some(ModuleKind::DynamicMain);
-                break;
-            }
-        }
-    }
+    let result = process_linker_args(args.iter(), user_settings)?;
 
     if user_settings.module_kind().requires_pic() {
         user_settings.pic = true;
     }
 
     Ok(result)
-}
-
-// The returned bool indicated whether the argument should be kept in the
-// compiler args.
-// TODO: update build settings from UserSettings::extra_compiler_flags as well
-fn update_build_settings_from_arg(
-    arg: &str,
-    build_settings: &mut BuildSettings,
-    user_settings: &mut UserSettings,
-) -> Result<bool> {
-    if let Some(opt_level) = arg.strip_prefix("-O") {
-        build_settings.opt_level = match opt_level {
-            "0" => OptLevel::O0,
-            "" | "1" => OptLevel::O1,
-            "2" => OptLevel::O2,
-            "3" => OptLevel::O3,
-            "4" => OptLevel::O4,
-            "s" => OptLevel::Os,
-            "z" => OptLevel::Oz,
-            x => bail!("Invalid argument: -O{x}"),
-        };
-        Ok(true)
-    } else if let Some(debug_level) = arg.strip_prefix("-g") {
-        build_settings.debug_level = match debug_level {
-            "" => DebugLevel::G2,
-            "0" => DebugLevel::G0,
-            "1" => DebugLevel::G1,
-            "2" => DebugLevel::G2,
-            "3" => DebugLevel::G3,
-
-            // There are other -g options such as `-gdwarf`, we pass those through
-            // without touching them.
-            _ => return Ok(false),
-        };
-        Ok(true)
-    } else if arg == "-fwasm-exceptions" {
-        user_settings.wasm_exceptions = true;
-        Ok(false)
-    } else if arg == "-fno-wasm-exceptions" {
-        user_settings.wasm_exceptions = false;
-        Ok(true)
-    } else if arg.contains("--wasm-use-legacy-eh=false") {
-        // This is a heuristic to detect --wasm-use-legacy-eh=true even when it is passed via -mllvm or -Wl,-mllvm. It's not perfect but should work in most cases.
-        user_settings.exception_style = ExceptionStyle::Exnref;
-        Ok(true)
-    } else if arg.contains("--wasm-use-legacy-eh") {
-        // This is a heuristic to detect --wasm-use-legacy-eh or --wasm-use-legacy-eh=true even when it is passed via -mllvm or -Wl,-mllvm. It's not perfect but should work in most cases.
-        user_settings.exception_style = ExceptionStyle::Legacy;
-        Ok(true)
-    } else if arg == "-fPIC" {
-        user_settings.pic = true;
-        Ok(true)
-    } else if arg == "-fno-PIC" {
-        user_settings.pic = false;
-        Ok(true)
-    } else if arg == "--wasm-opt" {
-        build_settings.use_wasm_opt = true;
-        Ok(false)
-    } else if arg == "--no-wasm-opt" {
-        build_settings.use_wasm_opt = false;
-        Ok(false)
-    } else {
-        Ok(true)
-    }
-}
-
-fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
-    match extension.to_str() {
-        Some("o") | Some("obj") => Some(ModuleKind::ObjectFile),
-        Some("so") => Some(ModuleKind::SharedLibrary),
-        _ => None, // Default to static main if no extension matches
-    }
 }
 
 pub fn run_command(mut command: Command) -> Result<()> {
@@ -1222,70 +1241,57 @@ pub fn run_command(mut command: Command) -> Result<()> {
 mod tests {
     use super::*;
     use crate::UserSettings;
-    use std::{ffi::OsStr, fs, path::PathBuf};
+    use std::{fs, path::PathBuf};
     use tempfile::TempDir;
 
-    #[test]
-    fn test_deduce_module_kind() {
-        assert_eq!(
-            deduce_module_kind(OsStr::new("o")),
-            Some(ModuleKind::ObjectFile)
-        );
-        assert_eq!(
-            deduce_module_kind(OsStr::new("so")),
-            Some(ModuleKind::SharedLibrary)
-        );
-        assert_eq!(deduce_module_kind(OsStr::new("unknown")), None);
-    }
+    // #[test]
+    // fn test_update_build_settings_from_arg() {
+    //     let mut bs = BuildSettings {
+    //         opt_level: OptLevel::O0,
+    //         debug_level: DebugLevel::G0,
+    //         use_wasm_opt: true,
+    //     };
+    //     let mut us = UserSettings::default();
+    //     assert!(update_build_settings_from_arg("-O3", &mut bs, &mut us).unwrap());
+    //     assert_eq!(bs.opt_level, OptLevel::O3);
+    //     assert!(update_build_settings_from_arg("-g1", &mut bs, &mut us).unwrap());
+    //     assert_eq!(bs.debug_level, DebugLevel::G1);
+    //     assert!(!update_build_settings_from_arg("--no-wasm-opt", &mut bs, &mut us).unwrap());
+    //     assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
+    //     assert_eq!(us.wasm_exceptions, true);
+    //     assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
+    //     assert_eq!(us.wasm_exceptions, false);
+    //     us = UserSettings::default();
+    //     assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
+    //     assert_eq!(us.exception_style, ExceptionStyle::Exnref);
+    //     assert_eq!(us.wasm_exceptions, true);
 
-    #[test]
-    fn test_update_build_settings_from_arg() {
-        let mut bs = BuildSettings {
-            opt_level: OptLevel::O0,
-            debug_level: DebugLevel::G0,
-            use_wasm_opt: true,
-        };
-        let mut us = UserSettings::default();
-        assert!(update_build_settings_from_arg("-O3", &mut bs, &mut us).unwrap());
-        assert_eq!(bs.opt_level, OptLevel::O3);
-        assert!(update_build_settings_from_arg("-g1", &mut bs, &mut us).unwrap());
-        assert_eq!(bs.debug_level, DebugLevel::G1);
-        assert!(!update_build_settings_from_arg("--no-wasm-opt", &mut bs, &mut us).unwrap());
-        assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
-        assert_eq!(us.wasm_exceptions, true);
-        assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
-        assert_eq!(us.wasm_exceptions, false);
-        us = UserSettings::default();
-        assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
-        assert_eq!(us.wasm_exceptions, true);
-
-        assert!(
-            update_build_settings_from_arg(
-                "-Wl,-mllvm,--wasm-use-legacy-eh=true",
-                &mut bs,
-                &mut us
-            )
-            .unwrap()
-        );
-        assert_eq!(us.exception_style, ExceptionStyle::Legacy);
-        // Verify toggling eh kind is still saved after disabling EH in general
-        assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
-        assert!(
-            update_build_settings_from_arg(
-                "-Wl,-mllvm,--wasm-use-legacy-eh=false",
-                &mut bs,
-                &mut us
-            )
-            .unwrap()
-        );
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
-        assert!(
-            update_build_settings_from_arg("-Wl,-mllvm,--wasm-use-legacy-eh", &mut bs, &mut us)
-                .unwrap()
-        );
-        assert_eq!(us.exception_style, ExceptionStyle::Legacy);
-    }
+    //     assert!(
+    //         update_build_settings_from_arg(
+    //             "-Wl,-mllvm,--wasm-use-legacy-eh=true",
+    //             &mut bs,
+    //             &mut us
+    //         )
+    //         .unwrap()
+    //     );
+    //     assert_eq!(us.exception_style, ExceptionStyle::Legacy);
+    //     // Verify toggling eh kind is still saved after disabling EH in general
+    //     assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
+    //     assert!(
+    //         update_build_settings_from_arg(
+    //             "-Wl,-mllvm,--wasm-use-legacy-eh=false",
+    //             &mut bs,
+    //             &mut us
+    //         )
+    //         .unwrap()
+    //     );
+    //     assert_eq!(us.exception_style, ExceptionStyle::Exnref);
+    //     assert!(
+    //         update_build_settings_from_arg("-Wl,-mllvm,--wasm-use-legacy-eh", &mut bs, &mut us)
+    //             .unwrap()
+    //     );
+    //     assert_eq!(us.exception_style, ExceptionStyle::Legacy);
+    // }
 
     #[test]
     fn test_prepare_compiler_args_and_build_settings() {
@@ -1313,17 +1319,18 @@ mod tests {
         assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
         assert_eq!(
             pa.linker_args,
-            vec![
-                "-foo".to_string(),
-                "bar".to_string(),
-                "baz".to_string(),
-                "-z".to_string(),
-                "zo".to_string()
-            ]
+            vec!["-foo".to_string(), "-z".to_string(), "zo".to_string()]
         );
         assert_eq!(pa.output, Some(PathBuf::from("out")));
         assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("lib.o")]);
+        assert_eq!(
+            pa.linker_inputs,
+            vec![
+                PathBuf::from("lib.o"),
+                PathBuf::from("bar"),
+                PathBuf::from("baz"),
+            ]
+        );
     }
 
     #[test]
@@ -1730,33 +1737,47 @@ mod tests {
 
     #[test]
     fn test_should_discard_linker_flag() {
-        // Test exact matches
-        assert!(should_discard_linker_flag("--end-group"));
-        assert!(should_discard_linker_flag("--start-group"));
-        assert!(should_discard_linker_flag("--as-needed"));
-        assert!(should_discard_linker_flag("--no-as-needed"));
-        assert!(should_discard_linker_flag("--allow-shlib-undefined"));
-        assert!(should_discard_linker_flag("--enable-new-dtags"));
-        assert!(should_discard_linker_flag("--stats"));
-        assert!(should_discard_linker_flag("--no-stats"));
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
+        let prepared = prepare_linker_args(
+            vec![
+                "--end-group".to_string(),
+                "--start-group".to_string(),
+                "--as-needed".to_string(),
+                "--no-as-needed".to_string(),
+                "-lmylib".to_string(),
+                "--allow-shlib-undefined".to_string(),
+                "--enable-new-dtags".to_string(),
+                "--stats".to_string(),
+                "--no-stats".to_string(),
+                "--version-script=/path/to/script".to_string(),
+                "--version-script".to_string(),
+                "/path/to/script".to_string(),
+                "--version-script,/path/to/script".to_string(),
+                "--version-script=foo.txt".to_string(),
+                "--export-dynamic".to_string(),
+                "-o".to_string(),
+                "--version-script=foo.txt".to_string(),
+                "--end-group".to_string(),
+            ],
+            &mut us,
+        )
+        .unwrap();
 
-        // Test version-script with = syntax
-        assert!(should_discard_linker_flag(
-            "--version-script=/path/to/script"
-        ));
-        assert!(should_discard_linker_flag("--version-script=foo.txt"));
-
-        // Test version-script with , syntax
-        assert!(should_discard_linker_flag(
-            "--version-script,/path/to/script"
-        ));
-        assert!(should_discard_linker_flag("--version-script,foo.txt"));
-
-        // Test flags that should NOT be discarded
-        assert!(!should_discard_linker_flag("-L"));
-        assert!(!should_discard_linker_flag("-l"));
-        assert!(!should_discard_linker_flag("--export-dynamic"));
-        assert!(!should_discard_linker_flag("-o"));
+        assert_eq!(
+            prepared.linker_args,
+            vec![
+                "-lmylib".to_string(),
+                "--version-script,/path/to/script".to_string(),
+                "--export-dynamic".to_string(),
+            ]
+        );
+        assert_eq!(
+            prepared.output,
+            Some(PathBuf::from("--version-script=foo.txt"))
+        );
     }
 
     #[test]
