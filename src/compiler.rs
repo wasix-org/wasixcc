@@ -387,9 +387,6 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 
             command_args.push(OsStr::new("-mllvm"));
             command_args.push(OsStr::new("--wasm-use-legacy-eh=false"));
-
-            command_args.push(OsStr::new("-mllvm"));
-            command_args.push(OsStr::new("--exception-model=wasm"));
         }
         Some(ExceptionHandlingKind::Legacy) => {
             command_args.push(OsStr::new("-fwasm-exceptions"));
