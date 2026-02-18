@@ -107,7 +107,7 @@ pub struct UserSettings {
     pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
     pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
     pub wasm_exceptions: bool,                  // key name: WASM_EXCEPTIONS
-    pub exception_style: ExceptionStyle,        // key name: WASM_EXCEPTIONS=legacy
+    pub exception_style: ExceptionStyle,        // key name: EXCEPTION_STYLE
     pub pic: bool,                              // key name: PIC
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
