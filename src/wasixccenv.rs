@@ -331,7 +331,7 @@ The following configuration options are available:
                            * shared-library: A dynamically-linked side module
                                  which can be loaded by a dynamic main
                            * object-file: An object file
-  WASM_EXCEPTIONS=<BOOL>   Whether to enable WebAssembly exception handling
+  WASM_EXCEPTIONS=<TYPE>   Whether to enable WebAssembly exception handling
                            support. The default for this value is `yes`, but
                            will be deduced to `no` if `-fno-wasm-exceptions`
                            is passed to the compiler, or to `legacy` if
