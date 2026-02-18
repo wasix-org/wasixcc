@@ -249,9 +249,12 @@ The following configuration options are available:
                            SYSROOT_PREFIX instead so wasixcc can pick the
                            sysroot with the correct configuration.
   SYSROOT_PREFIX=<PREFIX>  Set the sysroot prefix, which is expected to
-                           contain 5 subdirectories: 'sysroot',
-                           'sysroot-exnref-eh', and 'sysroot-exnref-ehpic',
-                           'sysroot-eh', and 'sysroot-ehpic'.
+                           contain the following 5 subdirectories:
+                             - 'sysroot'
+                             - 'sysroot-exnref-eh'
+                             - 'sysroot-exnref-ehpic'
+                             - 'sysroot-eh'
+                             - 'sysroot-ehpic'
   LLVM_LOCATION=<PATH>     Set the location of LLVM toolchain which will be
                            invoked without a version suffix. The path must
                            point to the installation directory of the
@@ -344,6 +347,13 @@ The following configuration options are available:
                            required for dynamic linking. PIC will be enabled
                            if module kind is `dynamic-main` or `shared-library`,
                            or if the `-fPIC` flag is passed to the compiler.
+  LEGACY_EXCEPTIONS=<BOOL> Whether to enable legacy exception handling support
+                           for engines that don't support the standardized
+                           exnref proposal. By default this is turned off but
+                           will be deduced if `-mllvm --wasm-use-legacy-eh=true`
+                           is passed to the compiler or linker. This option
+                           is only relevant if `WASM_EXCEPTIONS` is explicitly
+                           enabled or deduced.
   LINK_SYMBOLIC=<BOOL>     Whether to link the output with `-Bsymbolic`, which
                            binds defined symbols locally, hence preventing
                            similarly named symbols from other modules from
