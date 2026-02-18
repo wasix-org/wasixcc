@@ -305,16 +305,17 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => None, // Default to static main
     };
 
-    let (wasm_exceptions, exception_style) =
-        match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
-            Some("legacy") => (true, ExceptionStyle::Legacy),
-            Some(value) => (
-                read_bool_user_setting(value)
-                    .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
-                ExceptionStyle::Exnref,
-            ),
-            None => (true, ExceptionStyle::Exnref),
-        };
+    let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
+        Some(value) => read_bool_user_setting(value)
+            .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
+        None => true,
+    };
+
+    let exception_style = match try_get_user_setting_value("EXCEPTION_STYLE", args)?.as_deref() {
+        Some("legacy") => ExceptionStyle::Legacy,
+        None | Some("exnref") => ExceptionStyle::Exnref,
+        _ => bail!("Invalid value for EXCEPTION_STYLE: expected 'legacy' or 'exnref'"),
+    };
 
     let pic = match try_get_user_setting_value("PIC", args)? {
         Some(value) => read_bool_user_setting(&value)

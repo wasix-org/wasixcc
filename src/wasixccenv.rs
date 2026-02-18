@@ -331,29 +331,22 @@ The following configuration options are available:
                            * shared-library: A dynamically-linked side module
                                  which can be loaded by a dynamic main
                            * object-file: An object file
-  WASM_EXCEPTIONS=<TYPE>   Whether to enable WebAssembly exception handling
+  WASM_EXCEPTIONS=<BOOL>   Whether to enable WebAssembly exception handling
                            support. The default for this value is `yes`, but
                            will be deduced to `no` if `-fno-wasm-exceptions`
-                           is passed to the compiler, or to `legacy` if
-                           `-mllvm --wasm-use-legacy-eh=true` is passed to
-                           the compiler or linker. Valid values are:
-                           * yes (default): Enable exception handling support using
-                                 the standardized exnref proposal.
-                           * no: No exception handling support.
-                           * legacy: Enable legacy exception handling support,
-                                 which is compatible with engines that don't
-                                 support the standardized exnref proposal.
+                           is passed to the compiler.
+  EXCEPTION_STYLE=<STYLE>  The type of exception handling used in generated
+                           object files. This is only relevant if
+                           `WASM_EXCEPTIONS` is enabled. It will be deduced
+                           if `-mllvm --wasm-use-legacy-eh=true/false` is
+                           passed. Valid values are:
+                           * exnref (default): Use the standardized exception
+                                 handling with exnref.
+                           * legacy: Use legacy exception handling.
   PIC=<BOOL>               Whether to enable position-independent code (PIC),
                            required for dynamic linking. PIC will be enabled
                            if module kind is `dynamic-main` or `shared-library`,
                            or if the `-fPIC` flag is passed to the compiler.
-  LEGACY_EXCEPTIONS=<BOOL> Whether to enable legacy exception handling support
-                           for engines that don't support the standardized
-                           exnref proposal. By default this is turned off but
-                           will be deduced if `-mllvm --wasm-use-legacy-eh=true`
-                           is passed to the compiler or linker. This option
-                           is only relevant if `WASM_EXCEPTIONS` is explicitly
-                           enabled or deduced.
   LINK_SYMBOLIC=<BOOL>     Whether to link the output with `-Bsymbolic`, which
                            binds defined symbols locally, hence preventing
                            similarly named symbols from other modules from
