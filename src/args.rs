@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
-use crate::compiler::{ExceptionHandlingKind, ModuleKind};
+use crate::compiler::{ExceptionStyle, ModuleKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlvmLocation {
@@ -88,7 +88,6 @@ impl Default for BinaryenLocation {
 /// Settings provided by user through env vars or -s flags. Some can be overridden by
 /// compiler flags; e.g. `-fno-wasm-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
-#[cfg_attr(test, derive(Default))]
 pub struct UserSettings {
     pub sysroot_location: Option<PathBuf>,      // key name: SYSROOT
     pub sysroot_prefix: PathBuf,                // key name: SYSROOT_PREFIX
@@ -107,7 +106,8 @@ pub struct UserSettings {
     pub wasm_opt_suppress_default: bool,        // key name: WASM_OPT_SUPPRESS_DEFAULT
     pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
     pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
-    pub wasm_exceptions: Option<ExceptionHandlingKind>, // key name: WASM_EXCEPTIONS
+    pub wasm_exceptions: bool,                  // key name: WASM_EXCEPTIONS
+    pub exception_style: ExceptionStyle,        // key name: WASM_EXCEPTIONS=legacy
     pub pic: bool,                              // key name: PIC
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
@@ -116,28 +116,33 @@ pub struct UserSettings {
     pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
 }
 
+#[cfg(test)]
+impl Default for UserSettings {
+    fn default() -> Self {
+        gather_user_settings(&[]).unwrap()
+    }
+}
+
 impl UserSettings {
     pub fn sysroot_location(&self) -> Result<PathBuf> {
         if let Some(sysroot) = self.sysroot_location.as_deref() {
             Ok(sysroot.to_owned())
         } else {
-            match (self.wasm_exceptions, self.pic) {
-                (Some(ExceptionHandlingKind::Legacy), true) => {
+            match (self.wasm_exceptions, self.exception_style, self.pic) {
+                (true, ExceptionStyle::Legacy, true) => {
                     Ok(self.sysroot_prefix.join("sysroot-ehpic"))
                 }
-                (Some(ExceptionHandlingKind::Legacy), false) => {
-                    Ok(self.sysroot_prefix.join("sysroot-eh"))
-                }
-                (Some(ExceptionHandlingKind::Exnref), true) => {
+                (true, ExceptionStyle::Legacy, false) => Ok(self.sysroot_prefix.join("sysroot-eh")),
+                (true, ExceptionStyle::Exnref, true) => {
                     Ok(self.sysroot_prefix.join("sysroot-exnref-ehpic"))
                 }
-                (Some(ExceptionHandlingKind::Exnref), false) => {
+                (true, ExceptionStyle::Exnref, false) => {
                     Ok(self.sysroot_prefix.join("sysroot-exnref-eh"))
                 }
-                (None, true) => {
+                (false, _, true) => {
                     bail!("PIC without wasm exceptions is not a valid build configuration")
                 }
-                (None, false) => Ok(self.sysroot_prefix.join("sysroot")),
+                (false, _, false) => Ok(self.sysroot_prefix.join("sysroot")),
             }
         }
     }
@@ -300,19 +305,16 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         None => None, // Default to static main
     };
 
-    let wasm_exceptions = match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
-        Some("legacy") => Some(ExceptionHandlingKind::Legacy),
-        Some(value) => {
-            if read_bool_user_setting(value)
-                .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?
-            {
-                Some(ExceptionHandlingKind::Exnref)
-            } else {
-                None
-            }
-        }
-        None => Some(ExceptionHandlingKind::Exnref),
-    };
+    let (wasm_exceptions, exception_style) =
+        match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
+            Some("legacy") => (true, ExceptionStyle::Legacy),
+            Some(value) => (
+                read_bool_user_setting(value)
+                    .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
+                ExceptionStyle::Exnref,
+            ),
+            None => (true, ExceptionStyle::Exnref),
+        };
 
     let pic = match try_get_user_setting_value("PIC", args)? {
         Some(value) => read_bool_user_setting(&value)
@@ -370,6 +372,7 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         wasm_opt_preserve_unoptimized,
         module_kind,
         wasm_exceptions,
+        exception_style,
         pic,
         link_symbolic,
         generate_shell_script,
@@ -552,10 +555,8 @@ mod tests {
             vec!["m".to_string(), "n".to_string()]
         );
         assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
-        assert_eq!(
-            settings.wasm_exceptions,
-            Some(ExceptionHandlingKind::Exnref)
-        );
+        assert_eq!(settings.wasm_exceptions, true);
+        assert_eq!(settings.exception_style, ExceptionStyle::Exnref);
         assert!(!settings.pic);
     }
 }
