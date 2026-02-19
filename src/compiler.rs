@@ -104,7 +104,7 @@ static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "--no-as-needed",
         "--allow-shlib-undefined",
         "--enable-new-dtags",
-        "--version-script", // Prefix match for --version-script=... or --version-script,...
+        "--version-script",
         "--stats",
         "--no-stats",
     ]
