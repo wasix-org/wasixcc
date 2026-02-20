@@ -419,7 +419,6 @@ pub(super) fn prepare_compiler_args(
     let args = resolve_response_files(args)?;
 
     let flags = lex_compiler_args(args.iter())?;
-    dbg!(&flags);
 
     let mut result = process_compiler_flags(flags, &mut build_settings, user_settings)?;
 
