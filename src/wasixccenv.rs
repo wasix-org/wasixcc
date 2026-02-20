@@ -89,8 +89,9 @@ enum WasixccCommand {
 
 pub(crate) fn run() -> Result<()> {
     let args = Args::parse();
+    let envs = std::env::vars().collect();
 
-    let user_settings = gather_user_settings(&args.user_settings)?;
+    let user_settings = gather_user_settings(&args.user_settings, &envs)?;
 
     match args.command {
         WasixccCommand::InstallExecutables { path } => install_executables(path),

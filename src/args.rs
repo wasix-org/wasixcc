@@ -1,6 +1,6 @@
 #![cfg_attr(target_vendor = "wasmer", allow(unexpected_cfgs))]
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 
@@ -119,7 +119,7 @@ pub struct UserSettings {
 #[cfg(test)]
 impl Default for UserSettings {
     fn default() -> Self {
-        gather_user_settings(&[]).unwrap()
+        gather_user_settings(&[], &Default::default()).unwrap()
     }
 }
 
@@ -166,8 +166,9 @@ impl UserSettings {
 
 pub fn get_args_and_user_settings() -> Result<(Vec<String>, UserSettings)> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let envs = std::env::vars().collect();
     let (settings_args, args) = separate_user_settings_from_tool_args(args);
-    let user_settings = gather_user_settings(&settings_args)?;
+    let user_settings = gather_user_settings(&settings_args, &envs)?;
     Ok((args, user_settings))
 }
 
@@ -190,8 +191,11 @@ fn separate_user_settings_from_tool_args(args: Vec<String>) -> (Vec<String>, Vec
     (settings_args, tool_args)
 }
 
-pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
-    let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args)? {
+pub fn gather_user_settings(
+    args: &[String],
+    envs: &HashMap<String, String>,
+) -> Result<UserSettings> {
+    let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args, envs)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
         None => LlvmLocation::DefaultPath(
             std::env::home_dir()
@@ -200,7 +204,7 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         ),
     };
 
-    let binaryen_location = match try_get_user_setting_value("BINARYEN_LOCATION", args)? {
+    let binaryen_location = match try_get_user_setting_value("BINARYEN_LOCATION", args, envs)? {
         Some(path) => BinaryenLocation::UserProvided(PathBuf::from(path)),
         None => BinaryenLocation::DefaultPath(
             std::env::home_dir()
@@ -209,62 +213,64 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
         ),
     };
 
-    let sysroot_location = try_get_user_setting_value("SYSROOT", args)?;
+    let sysroot_location = try_get_user_setting_value("SYSROOT", args, envs)?;
 
-    let sysroot_prefix = try_get_user_setting_value("SYSROOT_PREFIX", args)?
+    let sysroot_prefix = try_get_user_setting_value("SYSROOT_PREFIX", args, envs)?
         .map(PathBuf::from)
         .or_else(|| std::env::home_dir().map(|home| home.join(".wasixcc/sysroot")))
         .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/sysroot"));
 
-    let extra_compiler_flags = match try_get_user_setting_value("COMPILER_FLAGS", args)? {
+    let extra_compiler_flags = match try_get_user_setting_value("COMPILER_FLAGS", args, envs)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let extra_compiler_post_flags = match try_get_user_setting_value("COMPILER_POST_FLAGS", args)? {
-        Some(flags) => read_string_list_user_setting(&flags),
-        None => vec![],
-    };
+    let extra_compiler_post_flags =
+        match try_get_user_setting_value("COMPILER_POST_FLAGS", args, envs)? {
+            Some(flags) => read_string_list_user_setting(&flags),
+            None => vec![],
+        };
 
-    let extra_compiler_flags_c = match try_get_user_setting_value("COMPILER_FLAGS_C", args)? {
+    let extra_compiler_flags_c = match try_get_user_setting_value("COMPILER_FLAGS_C", args, envs)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
     let extra_compiler_post_flags_c =
-        match try_get_user_setting_value("COMPILER_POST_FLAGS_C", args)? {
+        match try_get_user_setting_value("COMPILER_POST_FLAGS_C", args, envs)? {
             Some(flags) => read_string_list_user_setting(&flags),
             None => vec![],
         };
 
-    let extra_compiler_flags_cxx = match try_get_user_setting_value("COMPILER_FLAGS_CXX", args)? {
-        Some(flags) => read_string_list_user_setting(&flags),
-        None => vec![],
-    };
+    let extra_compiler_flags_cxx =
+        match try_get_user_setting_value("COMPILER_FLAGS_CXX", args, envs)? {
+            Some(flags) => read_string_list_user_setting(&flags),
+            None => vec![],
+        };
 
     let extra_compiler_post_flags_cxx =
-        match try_get_user_setting_value("COMPILER_POST_FLAGS_CXX", args)? {
+        match try_get_user_setting_value("COMPILER_POST_FLAGS_CXX", args, envs)? {
             Some(flags) => read_string_list_user_setting(&flags),
             None => vec![],
         };
 
-    let extra_linker_flags = match try_get_user_setting_value("LINKER_FLAGS", args)? {
+    let extra_linker_flags = match try_get_user_setting_value("LINKER_FLAGS", args, envs)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let include_cpp_symbols = match try_get_user_setting_value("INCLUDE_CPP_SYMBOLS", args)? {
+    let include_cpp_symbols = match try_get_user_setting_value("INCLUDE_CPP_SYMBOLS", args, envs)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for INCLUDE_CPP_SYMBOLS"))?,
         None => false,
     };
 
-    let wasm_opt_flags = match try_get_user_setting_value("WASM_OPT_FLAGS", args)? {
+    let wasm_opt_flags = match try_get_user_setting_value("WASM_OPT_FLAGS", args, envs)? {
         Some(flags) => read_string_list_user_setting(&flags),
         None => vec![],
     };
 
-    let run_wasm_opt = match try_get_user_setting_value("RUN_WASM_OPT", args)? {
+    let run_wasm_opt = match try_get_user_setting_value("RUN_WASM_OPT", args, envs)? {
         Some(value) => Some(
             read_bool_user_setting(&value)
                 .with_context(|| format!("Invalid value {value} for RUN_WASM_OPT"))?,
@@ -280,21 +286,21 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     };
 
     let wasm_opt_suppress_default =
-        match try_get_user_setting_value("WASM_OPT_SUPPRESS_DEFAULT", args)? {
+        match try_get_user_setting_value("WASM_OPT_SUPPRESS_DEFAULT", args, envs)? {
             Some(value) => read_bool_user_setting(&value)
                 .with_context(|| format!("Invalid value {value} for WASM_OPT_SUPPRESS_DEFAULT"))?,
             None => false,
         };
 
     let wasm_opt_preserve_unoptimized =
-        match try_get_user_setting_value("WASM_OPT_PRESERVE_UNOPTIMIZED", args)? {
+        match try_get_user_setting_value("WASM_OPT_PRESERVE_UNOPTIMIZED", args, envs)? {
             Some(value) => read_bool_user_setting(&value).with_context(|| {
                 format!("Invalid value {value} for WASM_OPT_PRESERVE_UNOPTIMIZED")
             })?,
             None => false,
         };
 
-    let module_kind = match try_get_user_setting_value("MODULE_KIND", args)? {
+    let module_kind = match try_get_user_setting_value("MODULE_KIND", args, envs)? {
         Some(kind) => Some(match kind.as_str() {
             "static-main" => ModuleKind::StaticMain,
             "dynamic-main" => ModuleKind::DynamicMain,
@@ -306,7 +312,7 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
     };
 
     let (wasm_exceptions, exception_style) =
-        match try_get_user_setting_value("WASM_EXCEPTIONS", args)?.as_deref() {
+        match try_get_user_setting_value("WASM_EXCEPTIONS", args, envs)?.as_deref() {
             Some("legacy") => (true, ExceptionStyle::Legacy),
             Some(value) => (
                 read_bool_user_setting(value)
@@ -316,38 +322,40 @@ pub fn gather_user_settings(args: &[String]) -> Result<UserSettings> {
             None => (true, ExceptionStyle::Exnref),
         };
 
-    let pic = match try_get_user_setting_value("PIC", args)? {
+    let pic = match try_get_user_setting_value("PIC", args, envs)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for PIC"))?,
         None => false,
     };
 
-    let link_symbolic = match try_get_user_setting_value("LINK_SYMBOLIC", args)? {
+    let link_symbolic = match try_get_user_setting_value("LINK_SYMBOLIC", args, envs)? {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for LINK_SYMBOLIC"))?,
         None => true,
     };
 
-    let generate_shell_script = match try_get_user_setting_value("GENERATE_SHELL_SCRIPT", args)? {
-        Some(value) => read_bool_user_setting(&value)
-            .with_context(|| format!("Invalid value {value} for GENERATE_SHELL_SCRIPT"))?,
-        None => false,
-    };
+    let generate_shell_script =
+        match try_get_user_setting_value("GENERATE_SHELL_SCRIPT", args, envs)? {
+            Some(value) => read_bool_user_setting(&value)
+                .with_context(|| format!("Invalid value {value} for GENERATE_SHELL_SCRIPT"))?,
+            None => false,
+        };
 
     let shell_script_wasmer_args =
-        match try_get_user_setting_value("SHELL_SCRIPT_WASMER_ARGS", args)? {
+        match try_get_user_setting_value("SHELL_SCRIPT_WASMER_ARGS", args, envs)? {
             Some(flags) => read_string_list_user_setting(&flags),
             None => vec![],
         };
 
     let discard_unsupported_flags =
-        match try_get_user_setting_value("DISCARD_UNSUPPORTED_FLAGS", args)? {
+        match try_get_user_setting_value("DISCARD_UNSUPPORTED_FLAGS", args, envs)? {
             Some(value) => read_bool_user_setting(&value)
                 .with_context(|| format!("Invalid value {value} for DISCARD_UNSUPPORTED_FLAGS"))?,
             None => false,
         };
 
-    let autoconf_workarounds = match try_get_user_setting_value("AUTOCONF_WORKAROUNDS", args)? {
+    let autoconf_workarounds = match try_get_user_setting_value("AUTOCONF_WORKAROUNDS", args, envs)?
+    {
         Some(value) => read_bool_user_setting(&value)
             .with_context(|| format!("Invalid value {value} for AUTOCONF_WORKAROUNDS"))?,
         None => false,
@@ -425,7 +433,11 @@ fn read_bool_user_setting(value: &str) -> Option<bool> {
     }
 }
 
-fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<String>> {
+fn try_get_user_setting_value(
+    name: &str,
+    args: &[String],
+    envs: &HashMap<String, String>,
+) -> Result<Option<String>> {
     for arg in args {
         if arg.starts_with(&format!("{}=", name)) {
             let value = arg.split('=').nth(1).unwrap();
@@ -434,8 +446,8 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
     }
 
     let env_name = format!("WASIXCC_{}", name);
-    if let Ok(env_value) = std::env::var(&env_name) {
-        return Ok(Some(env_value));
+    if let Some(env_value) = envs.get(&env_name) {
+        return Ok(Some(env_value.clone()));
     }
 
     Ok(None)
@@ -445,7 +457,7 @@ fn try_get_user_setting_value(name: &str, args: &[String]) -> Result<Option<Stri
 mod tests {
     use super::*;
     use crate::compiler::ModuleKind;
-    use std::{env, path::PathBuf};
+    use std::path::PathBuf;
 
     #[test]
     fn test_read_string_list_user_setting() {
@@ -510,17 +522,14 @@ mod tests {
     #[test]
     fn test_try_get_user_setting_value_arg_and_env() {
         let args = vec!["FOO=bar".to_string()];
-        unsafe {
-            env::remove_var("WASIXCC_FOO");
-        }
-        let got = try_get_user_setting_value("FOO", &args).unwrap();
+        let envs = HashMap::new();
+        let got = try_get_user_setting_value("FOO", &args, &envs).unwrap();
         assert_eq!(got, Some("bar".to_string()));
         // fallback to env
         let args2: Vec<String> = Vec::new();
-        unsafe {
-            env::set_var("WASIXCC_FOO", "baz");
-        }
-        let got2 = try_get_user_setting_value("FOO", &args2).unwrap();
+        let mut envs2 = HashMap::new();
+        envs2.insert("WASIXCC_FOO".to_string(), "baz".to_string());
+        let got2 = try_get_user_setting_value("FOO", &args2, &envs2).unwrap();
         assert_eq!(got2, Some("baz".to_string()));
     }
 
@@ -536,10 +545,8 @@ mod tests {
             "WASM_EXCEPTIONS=yes".to_string(),
             "PIC=false".to_string(),
         ];
-        unsafe {
-            env::remove_var("WASIXCC_LINKER_FLAGS");
-        }
-        let settings = gather_user_settings(&args).unwrap();
+        let envs = HashMap::new();
+        let settings = gather_user_settings(&args, &envs).unwrap();
         assert_eq!(settings.sysroot_location, Some(PathBuf::from("/sys")));
         assert_eq!(
             settings.extra_compiler_flags,
