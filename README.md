@@ -119,8 +119,7 @@ summary is provided here for reference:
 | `WASM_OPT_SUPPRESS_DEFAULT`     | Suppress default wasm-opt flags                                                                |
 | `WASM_OPT_PRESERVE_UNOPTIMIZED` | Whether to preserve the unoptimized binary in a temp directory                                 |
 | `MODULE_KIND`                   | Module type (static-main, dynamic-main, shared-library, object-file)                           |
-| `WASM_EXCEPTIONS`               | Enable WASM exception handling.                                                                |
-| `EXCEPTION_STYLE`               | The exception handling style to generate for WASM exception handling. (exnref, legacy)         |
+| `WASM_EXCEPTIONS`               | Enable WASM exception handling. (yes, no, legacy)                                              |
 | `PIC`                           | Enable position-independent code                                                               |
 | `LINK_SYMBOLIC`                 | Enable -Bsymbolic linking (enabled by default)                                                 |
 | `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
