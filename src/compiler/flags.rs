@@ -286,7 +286,7 @@ fn process_compiler_flags<'a>(
     let (linker_inputs, compiler_inputs) = inputs.into_iter().partition(|input| {
         matches!(
             input.extension().and_then(|ext| ext.to_str()),
-            Some("o") | Some("a") | Some("so") | Some("dll") | Some("dylib")
+            Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
         )
     });
 
