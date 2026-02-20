@@ -59,11 +59,11 @@ pub(super) fn lex_args<'a>(
     args: impl IntoIterator<Item = &'a (impl AsRef<str> + 'a)>,
     // Args that capture the next argument as their value, e.g. -I
     // They can also be used with an equals sign, e.g. -I=foo
-    // If the flag is a dash followed by a single character, it can also be used with no separator, e.g. -Ifoo
+    // If the flag is a dash followed by one or two characters, it can also be used with no separator, e.g. -Ifoo
     flags_with_value: &HashSet<&str>,
     // Flags with a value that is optional. They DO NOT capture the next argument as their value
     // They can be used with an equals sign, e.g. -I=foo
-    // If the flag is a dash followed by a single character, it can also be used with no separator, e.g. -Ifoo
+    // If the flag is a dash followed by one or two characters, it can also be used with no separator, e.g. -Ifoo
     flags_with_optional_value: &HashSet<&str>,
 ) -> Result<Vec<Flag<'a>>> {
     enum State<'a> {
@@ -78,18 +78,22 @@ pub(super) fn lex_args<'a>(
     for arg in args {
         state = match state {
             State::Normal => match arg.as_ref() {
+                // Everything after the terminator `--` is emitted as Positional
                 "--" => {
                     flags.push(Flag::Terminator());
                     State::Terminated
                 }
+                // Like -I foo with a separate argument
                 arg if flags_with_value.contains(arg) => {
                     // This is not perfect since some flags have an optional optional arg
                     State::ArgWithValue(arg)
                 }
+                // Like -ftls-model without an argument
                 arg if flags_with_optional_value.contains(arg) => {
                     flags.push(Flag::Simple(arg));
                     State::Normal
                 }
+                // Like -I (-Ifoo)
                 arg if flags_with_value
                     .iter()
                     .chain(flags_with_optional_value.iter())
@@ -100,6 +104,18 @@ pub(super) fn lex_args<'a>(
                     flags.push(Flag::WithValue(flag, value, Separator::None));
                     State::Normal
                 }
+                // Like -MQ (-MQfoo)
+                arg if flags_with_value
+                    .iter()
+                    .chain(flags_with_optional_value.iter())
+                    .any(|flag| flag.len() == 3 && arg.starts_with(flag)) =>
+                {
+                    let flag = &arg[..3];
+                    let value = &arg[3..];
+                    flags.push(Flag::WithValue(flag, value, Separator::None));
+                    State::Normal
+                }
+                // Like -ftls-model=local-exec with an argument
                 arg if flags_with_value
                     .iter()
                     .chain(flags_with_optional_value.iter())
@@ -111,10 +127,12 @@ pub(super) fn lex_args<'a>(
                     flags.push(Flag::WithValue(flag, value, Separator::Equals));
                     State::Normal
                 }
+                // Any other flag-like argument (starts with `-`) is emitted as Simple
                 arg if arg.starts_with("-") => {
                     flags.push(Flag::Simple(arg));
                     State::Normal
                 }
+                // Any non-flag argument is emitted as Positional
                 arg => {
                     flags.push(Flag::Positional(arg));
                     State::Normal
