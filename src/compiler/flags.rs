@@ -434,7 +434,6 @@ pub(super) fn prepare_compiler_args(
         result.linker_args.push("--no-shlib-sigcheck".to_owned());
     }
 
-    // TODO: Add extra linker args somewhere here
     let linker_result = prepare_linker_args(result.linker_args, user_settings)?;
 
     result.linker_args = linker_result.linker_args;
@@ -473,7 +472,6 @@ mod tests {
     use crate::{UserSettings, compiler::flags::lexer::Separator};
     use std::path::PathBuf;
 
-    // TODO: Add this one back
     #[test]
     fn test_update_build_settings_from_arg() {
         let mut bs = BuildSettings {
