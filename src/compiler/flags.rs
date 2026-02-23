@@ -188,21 +188,6 @@ fn update_build_settings_from_llvm_arg(arg: &str, user_settings: &mut UserSettin
     }
 }
 
-// Commented because I am pretty sure this is wrong. clang should not look at the output filename for determining the output type
-// Especially not in a way that will prevent a -c specified afterwards from working correctly
-// fn update_build_settings_from_output_value(arg: &str, user_settings: &mut UserSettings) {
-
-//     if user_settings.module_kind.is_some() {
-//         return;
-//     }
-
-//     let Some(module_kind) = PathBuf::from(arg).extension().and_then(deduce_module_kind) else {
-//         return;
-//     };
-
-//     user_settings.module_kind = Some(module_kind);
-// }
-
 fn lex_compiler_args<'a>(
     args: impl IntoIterator<Item = &'a (impl AsRef<str> + 'a)>,
 ) -> Result<Vec<Flag<'a>>> {
