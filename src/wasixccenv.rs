@@ -89,8 +89,9 @@ enum WasixccCommand {
 
 pub(crate) fn run() -> Result<()> {
     let args = Args::parse();
+    let envs = std::env::vars().collect();
 
-    let user_settings = gather_user_settings(&args.user_settings)?;
+    let user_settings = gather_user_settings(&args.user_settings, &envs)?;
 
     match args.command {
         WasixccCommand::InstallExecutables { path } => install_executables(path),
@@ -249,8 +250,12 @@ The following configuration options are available:
                            SYSROOT_PREFIX instead so wasixcc can pick the
                            sysroot with the correct configuration.
   SYSROOT_PREFIX=<PREFIX>  Set the sysroot prefix, which is expected to
-                           contain 3 subdirectories: 'sysroot',
-                           'sysroot-eh', and 'sysroot-ehpic'.
+                           contain the following 5 subdirectories:
+                             - 'sysroot'
+                             - 'sysroot-exnref-eh'
+                             - 'sysroot-exnref-ehpic'
+                             - 'sysroot-eh'
+                             - 'sysroot-ehpic'
   LLVM_LOCATION=<PATH>     Set the location of LLVM toolchain which will be
                            invoked without a version suffix. The path must
                            point to the installation directory of the
@@ -327,10 +332,18 @@ The following configuration options are available:
                            * shared-library: A dynamically-linked side module
                                  which can be loaded by a dynamic main
                            * object-file: An object file
-  WASM_EXCEPTIONS=<BOOL>   Whether to enable WebAssembly exception handling
-                           support. This value can be deduced from the
-                           `-fwasm-exceptions`/`-fno-wasm-exceptions` flags
-                           passed to the compiler.
+  WASM_EXCEPTIONS=<TYPE>   Whether to enable WebAssembly exception handling
+                           support. The default for this value is `yes`, but
+                           will be deduced to `no` if `-fno-wasm-exceptions`
+                           is passed to the compiler, or to `legacy` if
+                           `-mllvm --wasm-use-legacy-eh=true` is passed to
+                           the compiler or linker. Valid values are:
+                           * yes (default): Enable exception handling support using
+                                 the standardized exnref proposal.
+                           * no: No exception handling support.
+                           * legacy: Enable legacy exception handling support,
+                                 which is compatible with engines that don't
+                                 support the standardized exnref proposal.
   PIC=<BOOL>               Whether to enable position-independent code (PIC),
                            required for dynamic linking. PIC will be enabled
                            if module kind is `dynamic-main` or `shared-library`,

@@ -1,105 +1,21 @@
+use crate::{
+    args::UserSettings,
+    compiler::flags::{prepare_compiler_args, prepare_linker_args},
+};
+use anyhow::{Context, Result, bail};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ffi::{OsStr, OsString},
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    sync::LazyLock,
 };
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use anyhow::{Context, Result, bail};
-
-use crate::args::UserSettings;
-
+mod flags;
 mod response_file;
-
-static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-    [
-        "-MT",
-        "-MF",
-        "-MJ",
-        "-MQ",
-        "-D",
-        "-U",
-        "-o",
-        "-x",
-        "-Xpreprocessor",
-        "-include",
-        "-imacros",
-        "-idirafter",
-        "-iprefix",
-        "-iwithprefix",
-        "-iwithprefixbefore",
-        "-isysroot",
-        "-iwithsysroot",
-        "-imultilib",
-        "-A",
-        "-isystem",
-        "-iquote",
-        "-install_name",
-        "-compatibility_version",
-        "-mllvm",
-        "-mthread-model",
-        "-current_version",
-        "-I",
-        "-l",
-        "-L",
-        "-include-pch",
-        "--param",
-        "-target",
-        "--sysroot",
-        "-u",
-        "-undefined",
-        "-Xlinker",
-        "-Xclang",
-        "-z",
-    ]
-    .into()
-});
-
-static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-L", "-l"].into());
-
-// We always specify values for these flags according to the build configuration, so
-// they must be discarded even if they're provided externally
-static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-ftls-model", "--sysroot", "--target", "-mthread-model"].into());
-
-static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-    [
-        "--export",
-        "-flavor",
-        "-o",
-        "-mllvm",
-        "-L",
-        "-l",
-        "-m",
-        "-O",
-        "-y",
-        "-z",
-        "--version-script",
-    ]
-    .into()
-});
-
-// Some common linker flags are unsupported by wasm-ld
-static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-    [
-        "--end-group",
-        "--start-group",
-        "--as-needed",
-        "--no-as-needed",
-        "--allow-shlib-undefined",
-        "--enable-new-dtags",
-        "--version-script", // Prefix match for --version-script=... or --version-script,...
-        "--stats",
-        "--no-stats",
-    ]
-    .into()
-});
 
 static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-threads",
@@ -132,6 +48,15 @@ impl ModuleKind {
     pub fn is_executable(&self) -> bool {
         matches!(self, ModuleKind::StaticMain | ModuleKind::DynamicMain)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ExceptionStyle {
+    // Generate object files with the standardized exnref EH proposal
+    #[default]
+    Exnref,
+    // Generate object files with the legacy EH proposal
+    Legacy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,14 +294,39 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
 
-    if state.user_settings.wasm_exceptions {
-        command_args.push(OsStr::new("-fwasm-exceptions"));
-        command_args.push(OsStr::new("-mllvm"));
-        command_args.push(OsStr::new("--wasm-enable-sjlj"));
-        if state.cxx {
-            // Enable C++ exceptions as well
+    match (
+        state.user_settings.wasm_exceptions,
+        state.user_settings.exception_style,
+    ) {
+        (true, ExceptionStyle::Exnref) => {
+            command_args.push(OsStr::new("-fwasm-exceptions"));
+
             command_args.push(OsStr::new("-mllvm"));
             command_args.push(OsStr::new("--wasm-enable-eh"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-enable-sjlj"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-use-legacy-eh=false"));
+        }
+        (true, ExceptionStyle::Legacy) => {
+            command_args.push(OsStr::new("-fwasm-exceptions"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-enable-sjlj"));
+
+            command_args.push(OsStr::new("-mllvm"));
+            command_args.push(OsStr::new("--wasm-use-legacy-eh=true"));
+
+            if state.cxx {
+                // Enable C++ exceptions as well
+                command_args.push(OsStr::new("-mllvm"));
+                command_args.push(OsStr::new("--wasm-enable-eh"));
+            }
+        }
+        (false, _) => {
+            command_args.push(OsStr::new("-fno-wasm-exceptions"));
         }
     }
 
@@ -467,13 +417,28 @@ fn link_inputs(state: &State) -> Result<()> {
         "--export=__wasm_call_ctors",
     ]);
 
-    command.args(&state.user_settings.extra_linker_flags);
-
-    if state.user_settings.wasm_exceptions {
-        command.args(["-mllvm", "--wasm-enable-sjlj"]);
-        if state.cxx {
+    match (
+        state.user_settings.wasm_exceptions,
+        state.user_settings.exception_style,
+    ) {
+        (true, ExceptionStyle::Exnref) => {
             command.args(["-mllvm", "--wasm-enable-eh"]);
+            command.args(["-mllvm", "--wasm-enable-sjlj"]);
+            // Don't use legacy EH
+            command.args(["-mllvm", "--wasm-use-legacy-eh=false"]);
+            // Use native wasm exceptions
+            command.args(["-mllvm", "--exception-model=wasm"]);
         }
+        (true, ExceptionStyle::Legacy) => {
+            command.args(["-mllvm", "--wasm-enable-sjlj"]);
+            // Use legacy EH
+            command.args(["-mllvm", "--wasm-use-legacy-eh=true"]);
+
+            if state.cxx {
+                command.args(["-mllvm", "--wasm-enable-eh"]);
+            }
+        }
+        (false, _) => {}
     }
 
     let module_kind = state.user_settings.module_kind();
@@ -594,10 +559,20 @@ fn run_wasm_opt(state: &State) -> Result<()> {
     );
 
     if !state.user_settings.wasm_opt_suppress_default {
-        if state.user_settings.wasm_exceptions {
-            command.arg("--emit-exnref");
-        } else {
-            command.arg("--asyncify");
+        match (
+            state.user_settings.wasm_exceptions,
+            state.user_settings.exception_style,
+        ) {
+            (true, ExceptionStyle::Exnref) => {
+                // No conversion to exnref needed
+            }
+            (true, ExceptionStyle::Legacy) => {
+                // Convert old eh to new exnref
+                command.arg("--emit-exnref");
+            }
+            (false, _) => {
+                command.arg("--asyncify");
+            }
         }
 
         if !state
@@ -752,390 +727,6 @@ fn generate_shell_script(state: &State) -> Result<()> {
     Ok(())
 }
 
-/// Decide whether a linker flag should be discarded for wasm-ld.
-fn should_discard_linker_flag(flag: &str) -> bool {
-    for discard_flag in WASM_LD_FLAGS_TO_DISCARD.iter() {
-        if let Some(rest) = flag.strip_prefix(discard_flag) {
-            // Check for exact and prefix matches with = or , separator (e.g., --version-script=/path or --version-script,path)
-            if rest.is_empty() || rest.starts_with('=') || rest.starts_with(',') {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
-/// Filters out unsupported linker flags for wasm-ld.
-fn filter_linker_flags(args: impl Iterator<Item = String>) -> impl Iterator<Item = String> {
-    let mut next_is_value = false;
-    let mut discard_next_value = false;
-    args.filter(move |arg| {
-        if next_is_value {
-            // If this is a value for a flag we decided to discard, discard it too
-            let include_this = !discard_next_value;
-            next_is_value = false;
-            discard_next_value = false;
-            return include_this;
-        }
-
-        next_is_value = WASM_LD_FLAGS_WITH_ARGS.contains(arg.as_str());
-        if should_discard_linker_flag(arg) {
-            discard_next_value = next_is_value;
-            return false;
-        }
-        true
-    })
-}
-
-fn detect_autoconf_test<'a>(args: impl IntoIterator<Item = &'a String>) -> bool {
-    // Detect -o conftest and conftest.c
-    let mut next_is_output = false;
-    for arg in args {
-        match arg.as_str() {
-            "conftest.c" | "conftest.cpp" => return true,
-            "-o" => {
-                next_is_output = true;
-            }
-            "conftest" if next_is_output => return true,
-            _ => {
-                next_is_output = false;
-            }
-        }
-    }
-    false
-}
-
-fn prepare_compiler_args(
-    mut args: Vec<String>,
-    user_settings: &mut UserSettings,
-    run_cxx: bool,
-) -> Result<(PreparedArgs, BuildSettings)> {
-    fn process_one_arg(
-        arg: String,
-        next_arg: &mut Option<String>,
-        user_settings: &mut UserSettings,
-        build_settings: &mut BuildSettings,
-        result: &mut PreparedArgs,
-    ) -> Result<()> {
-        if let Some(arg) = arg.strip_prefix("-Wl,") {
-            for split in arg.split(',') {
-                result.linker_args.push(split.to_owned());
-            }
-        } else if arg == "-Xlinker" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -Xlinker");
-            };
-            result.linker_args.push(next_arg);
-        } else if arg == "-z" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -z");
-            };
-            result.linker_args.push("-z".to_owned());
-            result.linker_args.push(next_arg);
-        } else if arg == "-o" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -o");
-            };
-            let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none()
-                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
-            {
-                user_settings.module_kind = Some(module_kind);
-            }
-            result.output = Some(output);
-        } else if arg.starts_with('-') {
-            if update_build_settings_from_arg(&arg, build_settings, user_settings)? {
-                // Read the value early so it's also discarded if we discard the flag
-                let next_arg = if CLANG_FLAGS_WITH_ARGS.contains(arg.as_str()) {
-                    next_arg.take()
-                } else {
-                    None
-                };
-
-                if CLANG_FLAGS_TO_DISCARD.iter().any(|flag| {
-                    arg.strip_prefix(flag)
-                        .is_some_and(|value| value.is_empty() || value.starts_with('='))
-                }) {
-                    return Ok(());
-                }
-
-                let args_list = if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD
-                    .iter()
-                    .any(|flag| arg.starts_with(flag))
-                {
-                    &mut result.linker_args
-                } else {
-                    &mut result.compiler_args
-                };
-
-                args_list.push(arg);
-                if let Some(next_arg) = next_arg {
-                    args_list.push(next_arg);
-                }
-            }
-        } else {
-            // Assume it's an input file
-            let input = PathBuf::from(&arg);
-            match input.extension().and_then(|ext| ext.to_str()) {
-                Some("a") | Some("o") | Some("obj") | Some("so") => {
-                    result.linker_inputs.push(PathBuf::from(arg));
-                }
-                _ => {
-                    result.compiler_inputs.push(PathBuf::from(arg));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    let mut result = PreparedArgs {
-        compiler_args: Vec::new(),
-        linker_args: Vec::new(),
-        compiler_inputs: Vec::new(),
-        linker_inputs: Vec::new(),
-        output: None,
-    };
-    let mut build_settings = BuildSettings {
-        opt_level: OptLevel::O0,
-        debug_level: DebugLevel::G0,
-        use_wasm_opt: true,
-    };
-
-    if user_settings.autoconf_workarounds && detect_autoconf_test(&args) {
-        // wasm opt fails if signature mismatches produce an invalid module
-        user_settings.run_wasm_opt = Some(false);
-        // Pass the flag to the linker to avoid shlib signature checks
-        args.push("-Wl,--no-shlib-sigcheck".to_owned());
-    }
-
-    let mut extra_flags = vec![];
-    std::mem::swap(&mut extra_flags, &mut user_settings.extra_compiler_flags);
-    let mut extra_flags2 = vec![];
-    std::mem::swap(
-        &mut extra_flags2,
-        if run_cxx {
-            &mut user_settings.extra_compiler_flags_cxx
-        } else {
-            &mut user_settings.extra_compiler_flags_c
-        },
-    );
-    let mut extra_post_flags = vec![];
-    std::mem::swap(
-        &mut extra_post_flags,
-        &mut user_settings.extra_compiler_post_flags,
-    );
-    let mut extra_post_flags2 = vec![];
-    std::mem::swap(
-        &mut extra_post_flags2,
-        if run_cxx {
-            &mut user_settings.extra_compiler_post_flags_cxx
-        } else {
-            &mut user_settings.extra_compiler_post_flags_c
-        },
-    );
-
-    extra_flags.extend(extra_flags2);
-    extra_flags.extend(args);
-    extra_flags.extend(extra_post_flags);
-    extra_flags.extend(extra_post_flags2);
-    let mut args = response_file::ArgumentsStack::new(extra_flags);
-    let mut next_arg = None;
-    loop {
-        let arg = if let Some(arg) = next_arg.take() {
-            arg
-        } else if let Some(arg) = args.next()? {
-            arg
-        } else {
-            break;
-        };
-
-        next_arg = args.next()?;
-        process_one_arg(
-            arg,
-            &mut next_arg,
-            user_settings,
-            &mut build_settings,
-            &mut result,
-        )?;
-    }
-    result.linker_args = if user_settings.discard_unsupported_flags {
-        filter_linker_flags(result.linker_args.into_iter()).collect()
-    } else {
-        result.linker_args
-    };
-
-    if user_settings.module_kind.is_none() {
-        for arg in &result.compiler_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            } else if arg == "-c" || arg == "-S" || arg == "-E" {
-                user_settings.module_kind = Some(ModuleKind::ObjectFile);
-                break;
-            }
-        }
-    }
-
-    if user_settings.module_kind.is_none() {
-        for arg in &result.linker_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            }
-        }
-    }
-
-    Ok((result, build_settings))
-}
-
-fn prepare_linker_args(
-    args: Vec<String>,
-    user_settings: &mut UserSettings,
-) -> Result<PreparedArgs> {
-    let args = if user_settings.discard_unsupported_flags {
-        filter_linker_flags(args.into_iter()).collect()
-    } else {
-        args
-    };
-    fn process_one_arg(
-        arg: String,
-        next_arg: &mut Option<String>,
-        user_settings: &mut UserSettings,
-        result: &mut PreparedArgs,
-    ) -> Result<()> {
-        if arg == "-o" {
-            let Some(next_arg) = next_arg.take() else {
-                bail!("Expected argument after -o");
-            };
-            let output = PathBuf::from(next_arg);
-            if user_settings.module_kind.is_none()
-                && let Some(module_kind) = output.extension().and_then(deduce_module_kind)
-            {
-                user_settings.module_kind = Some(module_kind);
-            }
-            result.output = Some(output);
-        } else if arg.starts_with('-') {
-            let has_next_arg = WASM_LD_FLAGS_WITH_ARGS.contains(&arg[..]);
-            result.linker_args.push(arg);
-            if has_next_arg && let Some(next_arg) = next_arg.take() {
-                result.linker_args.push(next_arg);
-            }
-        } else {
-            // Assume it's an input file
-            result.linker_inputs.push(PathBuf::from(arg));
-        }
-
-        Ok(())
-    }
-
-    let mut result = PreparedArgs {
-        compiler_args: Vec::new(),
-        linker_args: Vec::new(),
-        compiler_inputs: Vec::new(),
-        linker_inputs: Vec::new(),
-        output: None,
-    };
-
-    let mut args = response_file::ArgumentsStack::new(args);
-    let mut next_arg = None;
-    loop {
-        let arg = if let Some(arg) = next_arg.take() {
-            arg
-        } else if let Some(arg) = args.next()? {
-            arg
-        } else {
-            break;
-        };
-
-        next_arg = args.next()?;
-        process_one_arg(arg, &mut next_arg, user_settings, &mut result)?;
-    }
-
-    if user_settings.module_kind.is_none() {
-        for arg in &result.linker_args {
-            if arg == "-shared" {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-                break;
-            } else if arg == "-pie" {
-                user_settings.module_kind = Some(ModuleKind::DynamicMain);
-                break;
-            }
-        }
-    }
-
-    if user_settings.module_kind().requires_pic() {
-        user_settings.pic = true;
-    }
-
-    Ok(result)
-}
-
-// The returned bool indicated whether the argument should be kept in the
-// compiler args.
-// TODO: update build settings from UserSettings::extra_compiler_flags as well
-fn update_build_settings_from_arg(
-    arg: &str,
-    build_settings: &mut BuildSettings,
-    user_settings: &mut UserSettings,
-) -> Result<bool> {
-    if let Some(opt_level) = arg.strip_prefix("-O") {
-        build_settings.opt_level = match opt_level {
-            "0" => OptLevel::O0,
-            "" | "1" => OptLevel::O1,
-            "2" => OptLevel::O2,
-            "3" => OptLevel::O3,
-            "4" => OptLevel::O4,
-            "s" => OptLevel::Os,
-            "z" => OptLevel::Oz,
-            x => bail!("Invalid argument: -O{x}"),
-        };
-        Ok(true)
-    } else if let Some(debug_level) = arg.strip_prefix("-g") {
-        build_settings.debug_level = match debug_level {
-            "" => DebugLevel::G2,
-            "0" => DebugLevel::G0,
-            "1" => DebugLevel::G1,
-            "2" => DebugLevel::G2,
-            "3" => DebugLevel::G3,
-
-            // There are other -g options such as `-gdwarf`, we pass those through
-            // without touching them.
-            _ => return Ok(false),
-        };
-        Ok(true)
-    } else if arg == "-fwasm-exceptions" {
-        user_settings.wasm_exceptions = true;
-        Ok(false)
-    } else if arg == "-fno-wasm-exceptions" {
-        user_settings.wasm_exceptions = false;
-        Ok(true)
-    } else if arg == "-fPIC" {
-        user_settings.pic = true;
-        Ok(true)
-    } else if arg == "-fno-PIC" {
-        user_settings.pic = false;
-        Ok(true)
-    } else if arg == "--wasm-opt" {
-        build_settings.use_wasm_opt = true;
-        Ok(false)
-    } else if arg == "--no-wasm-opt" {
-        build_settings.use_wasm_opt = false;
-        Ok(false)
-    } else {
-        Ok(true)
-    }
-}
-
-fn deduce_module_kind(extension: &OsStr) -> Option<ModuleKind> {
-    match extension.to_str() {
-        Some("o") | Some("obj") => Some(ModuleKind::ObjectFile),
-        Some("so") => Some(ModuleKind::SharedLibrary),
-        _ => None, // Default to static main if no extension matches
-    }
-}
-
 pub fn run_command(mut command: Command) -> Result<()> {
     tracing::debug!("Executing build command: {command:?}");
 
@@ -1153,104 +744,8 @@ pub fn run_command(mut command: Command) -> Result<()> {
 mod tests {
     use super::*;
     use crate::UserSettings;
-    use std::{ffi::OsStr, fs, path::PathBuf};
+    use std::{fs, path::PathBuf};
     use tempfile::TempDir;
-
-    #[test]
-    fn test_deduce_module_kind() {
-        assert_eq!(
-            deduce_module_kind(OsStr::new("o")),
-            Some(ModuleKind::ObjectFile)
-        );
-        assert_eq!(
-            deduce_module_kind(OsStr::new("so")),
-            Some(ModuleKind::SharedLibrary)
-        );
-        assert_eq!(deduce_module_kind(OsStr::new("unknown")), None);
-    }
-
-    #[test]
-    fn test_update_build_settings_from_arg() {
-        let mut bs = BuildSettings {
-            opt_level: OptLevel::O0,
-            debug_level: DebugLevel::G0,
-            use_wasm_opt: true,
-        };
-        let mut us = UserSettings::default();
-        assert!(update_build_settings_from_arg("-O3", &mut bs, &mut us).unwrap());
-        assert_eq!(bs.opt_level, OptLevel::O3);
-        assert!(update_build_settings_from_arg("-g1", &mut bs, &mut us).unwrap());
-        assert_eq!(bs.debug_level, DebugLevel::G1);
-        assert!(!update_build_settings_from_arg("--no-wasm-opt", &mut bs, &mut us).unwrap());
-        assert!(!update_build_settings_from_arg("-fwasm-exceptions", &mut bs, &mut us).unwrap());
-        assert!(us.wasm_exceptions);
-        assert!(update_build_settings_from_arg("-fno-wasm-exceptions", &mut bs, &mut us).unwrap());
-        assert!(!us.wasm_exceptions);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_and_build_settings() {
-        let mut us = UserSettings::default();
-        let args = vec![
-            "-O2".to_string(),
-            "-g0".to_string(),
-            "-fwasm-exceptions".to_string(),
-            "--no-wasm-opt".to_string(),
-            "-Wl,-foo,bar".to_string(),
-            "-Xlinker".to_string(),
-            "baz".to_string(),
-            "-z".to_string(),
-            "zo".to_string(),
-            "-o".to_string(),
-            "out".to_string(),
-            "in.c".to_string(),
-            "lib.o".to_string(),
-        ];
-        let (pa, bs) = prepare_compiler_args(args, &mut us, false).unwrap();
-        assert_eq!(bs.opt_level, OptLevel::O2);
-        assert_eq!(bs.debug_level, DebugLevel::G0);
-        assert!(!bs.use_wasm_opt);
-        assert!(us.wasm_exceptions);
-        assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
-        assert_eq!(
-            pa.linker_args,
-            vec![
-                "-foo".to_string(),
-                "bar".to_string(),
-                "baz".to_string(),
-                "-z".to_string(),
-                "zo".to_string()
-            ]
-        );
-        assert_eq!(pa.output, Some(PathBuf::from("out")));
-        assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("lib.o")]);
-    }
-
-    #[test]
-    fn test_prepare_linker_args() {
-        let mut us = UserSettings::default();
-        let args = vec![
-            "-o".to_string(),
-            "out.wasm".to_string(),
-            "-shared".to_string(),
-            "-m".to_string(),
-            "module".to_string(),
-            "mod.wasm".to_string(),
-        ];
-        let pa = prepare_linker_args(args, &mut us).unwrap();
-        assert_eq!(pa.output, Some(PathBuf::from("out.wasm")));
-        assert_eq!(
-            pa.linker_args,
-            vec![
-                "-shared".to_string(),
-                "-m".to_string(),
-                "module".to_string()
-            ]
-        );
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("mod.wasm")]);
-        assert_eq!(us.module_kind, Some(ModuleKind::SharedLibrary));
-    }
 
     #[test]
     fn test_sysroot_prefix() {
@@ -1258,23 +753,51 @@ mod tests {
             sysroot_prefix: PathBuf::from("/xxx"),
             ..Default::default()
         };
+        assert_eq!(us.wasm_exceptions, true);
+        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
         assert_eq!(
             us.sysroot_location().unwrap(),
-            PathBuf::from("/xxx/sysroot")
+            PathBuf::from("/xxx/sysroot-exnref-eh")
         );
 
         us.wasm_exceptions = true;
+        us.exception_style = ExceptionStyle::Legacy;
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-eh")
         );
 
+        us.wasm_exceptions = false;
+        us.exception_style = ExceptionStyle::Exnref;
+        assert_eq!(
+            us.sysroot_location().unwrap(),
+            PathBuf::from("/xxx/sysroot")
+        );
+
+        us.wasm_exceptions = false;
+        us.exception_style = ExceptionStyle::Legacy;
+        assert_eq!(
+            us.sysroot_location().unwrap(),
+            PathBuf::from("/xxx/sysroot")
+        );
+
         us.pic = true;
+        us.wasm_exceptions = true;
+        us.exception_style = ExceptionStyle::Exnref;
+        assert_eq!(
+            us.sysroot_location().unwrap(),
+            PathBuf::from("/xxx/sysroot-exnref-ehpic")
+        );
+
+        us.pic = true;
+        us.wasm_exceptions = true;
+        us.exception_style = ExceptionStyle::Legacy;
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-ehpic")
         );
 
+        us.pic = true;
         us.wasm_exceptions = false;
         assert!(us.sysroot_location().is_err());
 
@@ -1603,202 +1126,46 @@ mod tests {
 
     #[test]
     fn test_should_discard_linker_flag() {
-        // Test exact matches
-        assert!(should_discard_linker_flag("--end-group"));
-        assert!(should_discard_linker_flag("--start-group"));
-        assert!(should_discard_linker_flag("--as-needed"));
-        assert!(should_discard_linker_flag("--no-as-needed"));
-        assert!(should_discard_linker_flag("--allow-shlib-undefined"));
-        assert!(should_discard_linker_flag("--enable-new-dtags"));
-        assert!(should_discard_linker_flag("--stats"));
-        assert!(should_discard_linker_flag("--no-stats"));
-
-        // Test version-script with = syntax
-        assert!(should_discard_linker_flag(
-            "--version-script=/path/to/script"
-        ));
-        assert!(should_discard_linker_flag("--version-script=foo.txt"));
-
-        // Test version-script with , syntax
-        assert!(should_discard_linker_flag(
-            "--version-script,/path/to/script"
-        ));
-        assert!(should_discard_linker_flag("--version-script,foo.txt"));
-
-        // Test flags that should NOT be discarded
-        assert!(!should_discard_linker_flag("-L"));
-        assert!(!should_discard_linker_flag("-l"));
-        assert!(!should_discard_linker_flag("--export-dynamic"));
-        assert!(!should_discard_linker_flag("-o"));
-    }
-
-    #[test]
-    fn test_autoconf_workaround() {
-        let mut us = UserSettings::default();
-        us.autoconf_workarounds = true;
-        let args = vec![
-            "-o".to_string(),
-            "conftest".to_string(),
-            "conftest.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
-        // Should have disabled wasm-opt
-        assert_eq!(us.run_wasm_opt, Some(false));
-        // Should have added --no-shlib-sigcheck
-        assert_eq!(pa.linker_args, vec!["--no-shlib-sigcheck".to_string()]);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_via_wl() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
-        let args = vec![
-            "-Wl,--start-group".to_string(),
-            "-Wl,--end-group".to_string(),
-            "-Wl,--as-needed".to_string(),
-            "-Wl,-L/some/path".to_string(),
-            "-Wl,--version-script=/path/to/script".to_string(),
-            "-Wl,--version-script,/path/to/script2".to_string(),
-            "-Wl,--stats".to_string(),
-            "test.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
-        // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_multiple_via_wl() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
-        let args = vec![
-            "-Wl,--end-group".to_string(),
-            "-Wl,--end-group,-L/some/path/a,--end-group".to_string(),
-            "-Wl,--end-group,--version-script=/path/to/script,-L/some/path/b,--end-group"
-                .to_string(),
-            "-Wl,--end-group,--version-script,/path/to/script,-L/some/path/c,--end-group"
-                .to_string(),
-            "test.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
-        // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(
-            pa.linker_args,
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
+        let prepared = prepare_linker_args(
             vec![
-                "-L/some/path/a".to_string(),
-                "-L/some/path/b".to_string(),
-                "-L/some/path/c".to_string()
+                "--end-group".to_string(),
+                "--start-group".to_string(),
+                "--as-needed".to_string(),
+                "--no-as-needed".to_string(),
+                "-lmylib".to_string(),
+                "--allow-shlib-undefined".to_string(),
+                "--enable-new-dtags".to_string(),
+                "--stats".to_string(),
+                "--no-stats".to_string(),
+                "--version-script=/path/to/script".to_string(),
+                "--version-script".to_string(),
+                "/path/to/script".to_string(),
+                "--version-script,/path/to/script".to_string(),
+                "--version-script=foo.txt".to_string(),
+                "--export-dynamic".to_string(),
+                "-o".to_string(),
+                "--version-script=foo.txt".to_string(),
+                "--end-group".to_string(),
+            ],
+            &mut us,
+        )
+        .unwrap();
+
+        assert_eq!(
+            prepared.linker_args,
+            vec![
+                "-lmylib".to_string(),
+                "--version-script,/path/to/script".to_string(),
+                "--export-dynamic".to_string(),
             ]
         );
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_does_not_discard_linker_flags_by_default() {
-        let mut us = UserSettings::default();
-        let args = vec![
-            "-Xlinker".to_string(),
-            "--start-group".to_string(),
-            "-Xlinker".to_string(),
-            "-L/some/path".to_string(),
-            "test.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
         assert_eq!(
-            pa.linker_args,
-            vec!["--start-group".to_string(), "-L/some/path".to_string()]
+            prepared.output,
+            Some(PathBuf::from("--version-script=foo.txt"))
         );
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
-        let args = vec![
-            "-Xlinker".to_string(),
-            "--start-group".to_string(),
-            "-Xlinker".to_string(),
-            "--as-needed".to_string(),
-            "-Xlinker".to_string(),
-            "-L/some/path".to_string(),
-            "-Xlinker".to_string(),
-            "--version-script=path/to/script".to_string(),
-            "test.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
-        // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
-        let args = vec![
-            "-Xlinker".to_string(),
-            "--start-group".to_string(),
-            "-Xlinker".to_string(),
-            "--version-script".to_string(),
-            "-Xlinker".to_string(),
-            "/path/to/script".to_string(),
-            "-Xlinker".to_string(),
-            "-L/some/path".to_string(),
-            "-Xlinker".to_string(),
-            "--version-script".to_string(),
-            "-Xlinker".to_string(),
-            "/path/to/script2".to_string(),
-            "test.c".to_string(),
-        ];
-        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
-
-        // Only -L should be forwarded, all discard flags (including their arguments) should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
-    }
-
-    #[test]
-    fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_incomplete() {
-        let mut us = UserSettings::default();
-        // Missing the argument after the second -Xlinker
-        let args = vec![
-            "-Xlinker".to_string(),
-            "--version-script".to_string(),
-            "-Xlinker".to_string(),
-        ];
-        let result = prepare_compiler_args(args, &mut us, false);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected argument after -Xlinker")
-        );
-    }
-
-    #[test]
-    fn test_prepare_linker_args_discard_flags() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
-        let args = vec![
-            "--start-group".to_string(),
-            "--end-group".to_string(),
-            "--as-needed".to_string(),
-            "-L/some/path".to_string(),
-            "--version-script=/path/to/script".to_string(),
-            "--version-script".to_string(),
-            "another.txt".to_string(),
-            "--stats".to_string(),
-            "-o".to_string(),
-            "output.wasm".to_string(),
-            "input.o".to_string(),
-        ];
-        let pa = prepare_linker_args(args, &mut us).unwrap();
-
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
-        assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
     }
 }
