@@ -130,7 +130,7 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-g2" | "-g") => build_settings.debug_level = DebugLevel::G2,
         Flag::Simple("-g3") => build_settings.debug_level = DebugLevel::G3,
         Flag::Simple("-fwasm-exceptions") => user_settings.wasm_exceptions = true,
-        Flag::Simple("-fno-wasm-exceptions") => user_settings.wasm_exceptions = false,
+        Flag::Simple("-fno-exceptions") => user_settings.wasm_exceptions = false,
         Flag::Simple("-fPIC") => user_settings.pic = true,
         Flag::Simple("-fno-PIC") => user_settings.pic = false,
         Flag::Simple("--wasm-opt") => build_settings.use_wasm_opt = true,
@@ -475,11 +475,7 @@ mod tests {
             &mut us,
         );
         assert_eq!(us.wasm_exceptions, true);
-        update_build_settings_from_compiler_flag(
-            Flag::Simple("-fno-wasm-exceptions"),
-            &mut bs,
-            &mut us,
-        );
+        update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
         assert_eq!(us.wasm_exceptions, false);
         us = UserSettings::default();
         update_build_settings_from_compiler_flag(
@@ -507,11 +503,7 @@ mod tests {
         assert_eq!(us.exception_style, ExceptionStyle::Legacy);
 
         // Verify toggling eh kind is still saved after disabling EH in general
-        update_build_settings_from_compiler_flag(
-            Flag::Simple("-fno-wasm-exceptions"),
-            &mut bs,
-            &mut us,
-        );
+        update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
         assert_eq!(us.exception_style, ExceptionStyle::Legacy);
         update_build_settings_from_compiler_flag(
             Flag::WithValue("-mllvm", "--wasm-use-legacy-eh=false", Separator::Space),

@@ -334,7 +334,7 @@ The following configuration options are available:
                            * object-file: An object file
   WASM_EXCEPTIONS=<TYPE>   Whether to enable WebAssembly exception handling
                            support. The default for this value is `yes`, but
-                           will be deduced to `no` if `-fno-wasm-exceptions`
+                           will be deduced to `no` if `-fno-exceptions`
                            is passed to the compiler, or to `legacy` if
                            `-mllvm --wasm-use-legacy-eh=true` is passed to
                            the compiler or linker. Valid values are:

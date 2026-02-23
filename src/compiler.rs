@@ -326,7 +326,7 @@ fn compile_inputs(state: &mut State) -> Result<()> {
             }
         }
         (false, _) => {
-            command_args.push(OsStr::new("-fno-wasm-exceptions"));
+            command_args.push(OsStr::new("-fno-exceptions"));
         }
     }
 
