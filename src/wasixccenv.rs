@@ -1,14 +1,13 @@
-#[cfg(unix)]
-use std::path::Path;
-use std::path::PathBuf;
-
-use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
-
 use crate::{
     args::{UserSettings, gather_user_settings},
     download::{self, TagSpec},
+    wasixccenv::shell_env::{install_env_files, setup_shell_rcs},
 };
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
+
+mod shell_env;
 
 #[cfg(unix)]
 const COMMANDS: &[&str] = &["cc", "++", "cc++", "ar", "nm", "ranlib", "ld"];
@@ -30,8 +29,14 @@ struct Args {
 #[derive(Subcommand)]
 enum WasixccCommand {
     /// Install wasixcc executables (via symlinks to this binary) to the
-    /// specified path
-    InstallExecutables { path: PathBuf },
+    /// BIN_LOCATION specified in user settings.
+    InstallExecutables {
+        #[arg(long, default_value = "false")]
+        /// Set to create a symlink to wasixccenv instead of copying it to the target location.
+        /// This is useful for development and testing purposes, but for production use
+        /// it's recommended to copy the executable rather than symlinking it.
+        symlink_wasixccenv: bool,
+    },
     /// Download the WASIX sysroot
     DownloadSysroot {
         /// The tag from which to download the sysroot, either 'latest' or a
@@ -65,6 +70,9 @@ enum WasixccCommand {
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
     },
+    /// Install wasixcc into the home of the current user.
+    ///
+    /// This will create a .wasixcc directory in the user's home directory and adjust all rc files to add that to the PATH.
     AioInstall {
         #[arg(long)]
         /// The tag from which to download the sysroot, either 'latest' or a
@@ -78,13 +86,19 @@ enum WasixccCommand {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
-        /// The path where the wasixcc executables will be installed
-        path: PathBuf,
     },
     /// Print the sysroot location according to current configuration
     PrintSysroot,
     /// Print help information about wasixcc configuration options
     HelpConfig,
+    /// Install sourceable env files to the wasixcc location
+    InstallEnvFiles,
+    /// Add sourcing of the env files to shell rc files
+    SetupShellRcs {
+        #[arg(long)]
+        /// The home directory to look for shell rc files in. Defaults to the current user's home directory.
+        home: Option<PathBuf>,
+    },
 }
 
 pub(crate) fn run() -> Result<()> {
@@ -94,7 +108,14 @@ pub(crate) fn run() -> Result<()> {
     let user_settings = gather_user_settings(&args.user_settings, &envs)?;
 
     match args.command {
-        WasixccCommand::InstallExecutables { path } => install_executables(path),
+        WasixccCommand::InstallExecutables { symlink_wasixccenv } => {
+            let installer_path =
+                std::env::current_exe().context("Failed to get the path of wasixccenv")?;
+            let installer_path = installer_path
+                .canonicalize()
+                .context("Failed to get the absolute path of wasixccenv")?;
+            install_executables(&user_settings, &installer_path, symlink_wasixccenv)
+        }
         WasixccCommand::DownloadSysroot { tag } => {
             download_sysroot(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
@@ -118,12 +139,45 @@ pub(crate) fn run() -> Result<()> {
             binaryen_tag,
             llvm_tag,
             sysroot_tag,
-            path,
         } => {
+            let home =
+                std::env::home_dir().context("Failed to get current user's home directory")?;
+            let installer_path =
+                std::env::current_exe().context("Failed to get the path of wasixccenv")?;
+            let installer_path = installer_path
+                .canonicalize()
+                .context("Failed to get the absolute path of wasixccenv")?;
+
             download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
-            install_executables(path)?;
+
+            install_executables(&user_settings, &installer_path, false)?;
+
+            install_env_files(&user_settings.location)?;
+            setup_shell_rcs(&home)?;
+
+            let wasixcc_location = user_settings.location.to_string_lossy().to_string();
+            let env_posix_shell =
+                wasixcc_location.replace(&home.to_string_lossy().to_string(), "~") + "/env";
+            let env_nu_shell = format!(
+                "$\"{}\"",
+                wasixcc_location.replace(&home.to_string_lossy().to_string(), "($nu.home-path)")
+                    + "/env.nu"
+            );
+
+            let message = format!(
+                r#"wasixcc installed successfully!
+
+To start using wasixcc, please restart your terminal or
+run the appropriate command to source the environment file for your shell:
+
+. {env_posix_shell}
+source {env_posix_shell}  # For fish
+source {env_nu_shell}  # For nushell"
+"#
+            );
+            println!("{message}");
             Ok(())
         }
         WasixccCommand::PrintSysroot => print_sysroot(&user_settings),
@@ -131,6 +185,12 @@ pub(crate) fn run() -> Result<()> {
             print_configuration_help();
             Ok(())
         }
+        WasixccCommand::InstallEnvFiles => install_env_files(&user_settings.location),
+        WasixccCommand::SetupShellRcs { home } => setup_shell_rcs(
+            &home
+                .or_else(|| std::env::home_dir())
+                .context("Failed to get current user's home directory")?,
+        ),
     }
 }
 
@@ -149,74 +209,107 @@ pub fn download_binaryen(tag_spec: TagSpec, user_settings: &UserSettings) -> Res
     download::download_binaryen(tag_spec, user_settings)
 }
 
+// Install the current wasixccenv binary to the specified path
+fn install_wasixccenv(bin_dir: &Path, wasixccenv: &Path, symlink: bool) -> Result<PathBuf> {
+    let target_path = bin_dir.join("wasixccenv");
+    let exe_path = wasixccenv;
+
+    if symlink {
+        symlink_executable(&exe_path, &target_path)?;
+    } else {
+        copy_executable(&exe_path, &target_path)?;
+    }
+
+    Ok(target_path)
+}
+
 #[cfg_attr(target_vendor = "wasmer", allow(unused_variables))]
-fn install_executables(path: PathBuf) -> Result<()> {
+fn install_executables(
+    user_settings: &UserSettings,
+    wasixccenv: &Path,
+    symlink_wasixccenv: bool,
+) -> Result<()> {
     #[cfg(not(unix))]
     {
         anyhow::bail!("wasixcc only supports installation on unix systems at this time");
     }
 
-    #[cfg(unix)]
-    {
-        use std::{env, fs};
+    use std::fs;
+    let bin_dir = &user_settings.bin_location;
 
-        fs::create_dir_all(&path)
-            .with_context(|| format!("Failed to create directory at {path:?}"))?;
+    fs::create_dir_all(&bin_dir)
+        .with_context(|| format!("Failed to create directory at {bin_dir:?}"))?;
 
-        let exe_path = env::current_exe().context("Failed to get current executable path")?;
-        let exe_path = exe_path
-            .canonicalize()
-            .context("Failed to canonicalize current executable path")?;
+    let relative_wasixccenv = PathBuf::from("./wasixccenv");
 
-        for command in COMMANDS {
-            let target = path.join(format!("wasix{}", command));
+    for command in COMMANDS {
+        let target = bin_dir.join(format!("wasix{}", command));
 
-            if fs::metadata(&target).is_ok() {
-                fs::remove_file(&target)
-                    .with_context(|| format!("Failed to remove existing file at {target:?}"))?;
-            }
-
-            symlink_executable(&exe_path, &target)?;
+        if fs::metadata(&target).is_ok() {
+            fs::remove_file(&target)
+                .with_context(|| format!("Failed to remove existing file at {target:?}"))?;
         }
 
-        // Also symlink wasixccenv itself, in case the current binary is not on PATH
-        {
-            let target = path.join("wasixccenv");
-
-            let mut should_install_symlink = true;
-            if let Ok(metadata) = fs::metadata(&target) {
-                let canonicalized_target = target
-                    .canonicalize()
-                    .context("Failed to canonicalize wasixccenv symlink path")?;
-
-                // We definitely don't want to overwrite the current binary with a
-                // self-referential symlink. If we're not looking at the same path,
-                // Maybe there's another installation of wasixccenv at the target path?
-                if canonicalized_target == exe_path || metadata.is_file() {
-                    should_install_symlink = false;
-                } else {
-                    fs::remove_file(&target)
-                        .with_context(|| format!("Failed to remove existing file at {target:?}"))?;
-                }
-            }
-
-            if should_install_symlink {
-                symlink_executable(&exe_path, &target)?;
-            }
-        }
-
-        Ok(())
+        symlink_executable(&relative_wasixccenv, &target)?;
     }
+
+    // For wasixccenv itself, symlink or copy depending on what was requested.
+    install_wasixccenv(&bin_dir, &wasixccenv, symlink_wasixccenv)?;
+
+    Ok(())
 }
 
 #[cfg(unix)]
-fn symlink_executable(exe_path: &Path, target: &Path) -> Result<()> {
+fn symlink_executable(original: &Path, link: &Path) -> Result<()> {
     use std::os::unix::fs as unix_fs;
 
-    unix_fs::symlink(exe_path, target)
-        .with_context(|| format!("Failed to create symlink at {target:?}"))?;
+    unix_fs::symlink(original, link)
+        .with_context(|| format!("Failed to create symlink at {link:?}"))?;
 
-    println!("Created command {target:?}");
+    println!("Created command {link:?}");
+
+    Ok(())
+}
+
+fn copy_executable(original: &Path, link: &Path) -> Result<()> {
+    let canonicalized_original = original
+        .canonicalize()
+        .context("Failed to canonicalize current executable path")?;
+    let canonicalized_link = link.canonicalize().unwrap_or_else(|_| link.to_path_buf());
+
+    if canonicalized_original == canonicalized_link {
+        // Don't install if the target path is the same as the current executable path
+        tracing::info!("Target path {link:?} is already installed");
+        return Ok(());
+    }
+
+    if link.exists() {
+        std::fs::remove_file(&link)
+            .with_context(|| format!("Failed to remove existing wasixccenv at {link:?}"))?;
+    }
+
+    let target_dir = link
+        .parent()
+        .context("Failed to get parent directory of target path")?;
+    std::fs::create_dir_all(target_dir)
+        .with_context(|| format!("Failed to create directory at {target_dir:?}"))?;
+
+    std::fs::copy(&canonicalized_original, link)
+        .with_context(|| format!("Failed to copy executable to {link:?}"))?;
+
+    // Set permissions to 755 to ensure the copied executable is runnable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(link)
+            .with_context(|| format!("Failed to get metadata for {link:?}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(link, perms)
+            .with_context(|| format!("Failed to set permissions for {link:?}"))?;
+    }
+
+    println!("Created command {link:?}");
 
     Ok(())
 }
@@ -400,6 +493,14 @@ The following configuration options are available:
                            tests will always fail. Enabling this option will try to
                            detect such tests and allow the compilation to succeed
                            even if there is a signature mismatch.
+  LOCATION=<PATH>          The base location for wasixcc to store its files, such as
+                           the sysroot and LLVM toolchain. wasixcc will create
+                           a directory at LOCATION and store everything there.
+                           The default location is ~/.wasixcc.
+  BIN_LOCATION=<PATH>      The location for wasixcc to install its executables, such as
+                           wasixccenv and the compiler toolchain. The default is
+                           LOCATION/bin, which means executables will be installed
+                           to the 'bin' subdirectory of LOCATION.
 "#
     );
 }

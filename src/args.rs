@@ -113,6 +113,8 @@ pub struct UserSettings {
     pub shell_script_wasmer_args: Vec<String>,  // key name: SHELL_SCRIPT_WASMER_ARGS
     pub discard_unsupported_flags: bool,        // key name: DISCARD_UNSUPPORTED_FLAGS
     pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
+    pub location: PathBuf,                      // key name: LOCATION
+    pub bin_location: PathBuf,                  // key name: BIN_LOCATION
 }
 
 #[cfg(test)]
@@ -192,30 +194,44 @@ pub fn gather_user_settings(
     args: &[String],
     envs: &HashMap<String, String>,
 ) -> Result<UserSettings> {
+    // The main .wasixcc directory
+    let location = match try_get_user_setting_value("LOCATION", args, envs)? {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            if path.is_relative() {
+                tracing::warn!(
+                    ?path,
+                    "Using relative LOCATION for wasixcc. This is not recommended and may cause \
+                    unexpected behavior. Use this only if you know what you're doing."
+                );
+            }
+            path
+        }
+        None => std::env::home_dir()
+            .map(|home| home.join(".wasixcc"))
+            .unwrap_or_else(|| PathBuf::from("/lib/wasixcc")),
+    };
+
     let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args, envs)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
-        None => LlvmLocation::DefaultPath(
-            std::env::home_dir()
-                .map(|home| home.join(".wasixcc/llvm"))
-                .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/llvm")),
-        ),
+        None => LlvmLocation::DefaultPath(location.join("llvm")),
+    };
+
+    let bin_location = match try_get_user_setting_value("BIN_LOCATION", args, envs)? {
+        Some(path) => PathBuf::from(path),
+        None => location.join("bin"),
     };
 
     let binaryen_location = match try_get_user_setting_value("BINARYEN_LOCATION", args, envs)? {
         Some(path) => BinaryenLocation::UserProvided(PathBuf::from(path)),
-        None => BinaryenLocation::DefaultPath(
-            std::env::home_dir()
-                .map(|home| home.join(".wasixcc/binaryen"))
-                .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/binaryen")),
-        ),
+        None => BinaryenLocation::DefaultPath(location.join("binaryen")),
     };
 
     let sysroot_location = try_get_user_setting_value("SYSROOT", args, envs)?;
 
     let sysroot_prefix = try_get_user_setting_value("SYSROOT_PREFIX", args, envs)?
         .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|home| home.join(".wasixcc/sysroot")))
-        .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/sysroot"));
+        .unwrap_or(location.join("sysroot"));
 
     let extra_compiler_flags = match try_get_user_setting_value("COMPILER_FLAGS", args, envs)? {
         Some(flags) => read_string_list_user_setting(&flags),
@@ -388,6 +404,8 @@ pub fn gather_user_settings(
         shell_script_wasmer_args,
         discard_unsupported_flags,
         autoconf_workarounds,
+        location,
+        bin_location,
     })
 }
 

@@ -1,17 +1,23 @@
 #!/usr/bin/env sh
 set -e
 
-WASIXCC_DIR="$HOME/.wasixcc"
-WASIXCC_BIN="$WASIXCC_DIR/bin"
-WASIXCC_EXECUTABLE="$WASIXCC_DIR/wasixccenv"
-
-# If set to latest => latest, if empty => do not install, else use as is
+# Settings
 WASIXCC_SYSROOT_TAG="latest"
 WASIXCC_LLVM_TAG="latest"
 WASIXCC_BINARYEN_TAG="latest"
-
 VERSION="0.4.2"
-TARGET= # detected in detect_target()
+
+TARGET="" # detected in detect_target()
+
+TEMP_DIR="" # set in download_wasixccenv()
+WASIXCCENV="" # set in download_wasixccenv()
+cleanup() {
+    if test -n "$TEMP_DIR" && test -d "$TEMP_DIR"; then
+        rm -r "$TEMP_DIR"
+    fi
+}
+trap cleanup EXIT
+trap cleanup INT
 
 log() {
     echo -- "$1" >&2
@@ -22,28 +28,11 @@ fail() {
     exit 1
 }
 
-append_block_to_env_file() {
-  file="$1"
-  body="$2"
-
-  # Only touch existing files
-  [ -f "$file" ] || return 0
-
-  # Already installed?
-  grep -Fqs "# >>> wasixcc initialize >>>" "$file" && return 0
-
-  {
-    echo ""
-    echo "# >>> wasixcc initialize >>>"
-    echo "$body"
-    echo "# <<< wasixcc initialize <<<"
-  } >>"$file"
-}
-
 check_command() {
     command -v "$1" > /dev/null
 }
 
+# Assert all required dependencies are available
 find_deps() {
     if check_command curl ; then
         CURL="curl"
@@ -95,15 +84,16 @@ detect_target() {
     esac
 }
 
-download_wasixcc() {
+# Download wasixccenv from the GitHub releases, extract it, and set the WASIXCCENV variable to its path.
+download_wasixccenv() {
     if test -z "$TARGET" ; then
         fail "Error: Could not detect target platform."
     fi
 
-    log "Fetching the latest wasixcc executable"
+    log "Fetching wasixcc $VERSION"
 
-    mkdir -p "$WASIXCC_DIR"
-    cd "$WASIXCC_DIR"
+    TEMP_DIR="$(mktemp -d)"
+    cd "$TEMP_DIR"
     if test -n "$CURL" ; then
         if test -n "$GITHUB_TOKEN" ; then
             "$CURL" -H "authorization: Bearer $GITHUB_TOKEN" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
@@ -117,117 +107,24 @@ download_wasixcc() {
             "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
         fi
     fi
+    WASIXCCENV="$TEMP_DIR/wasixccenv"
+
     cd - > /dev/null 2>&1
 
-    if test ! -f "$WASIXCC_EXECUTABLE" ; then
+    if test ! -f "$WASIXCCENV" ; then
         fail "Error: Failed to download wasixcc executable."
     fi
-    if ! "$WASIXCC_EXECUTABLE" --version >/dev/null ; then
-        fail "Error: $WASIXCC_EXECUTABLE is not working."
+    if ! "$WASIXCCENV" --version >/dev/null ; then
+        fail "Error: $WASIXCCENV is not working."
     fi
 
     log "Downloaded wasixcc"
 }
 
-# Install symlinks at ~/.wasixcc/bin
-install_executables() {
-    mkdir -p "$WASIXCC_BIN"
-    "$WASIXCC_EXECUTABLE" install-executables "$WASIXCC_BIN"
-}
-
-# Download sysroot, LLVM, and Binaryen
-download_dependencies() {
-    case "$WASIXCC_SYSROOT_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" download-sysroot ;;
-        "") : ;;
-        *) "$WASIXCC_EXECUTABLE" download-sysroot "$WASIXCC_SYSROOT_TAG" ;;
-    esac
-
-    case "$WASIXCC_LLVM_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" download-llvm ;;
-        "") : ;;
-        *) "$WASIXCC_EXECUTABLE" download-llvm "$WASIXCC_LLVM_TAG" ;;
-    esac
-
-    case "$WASIXCC_BINARYEN_TAG" in
-        latest) "$WASIXCC_EXECUTABLE" download-binaryen ;;
-        "") : ;;
-        *) "$WASIXCC_EXECUTABLE" download-binaryen "$WASIXCC_BINARYEN_TAG" ;;
-    esac
-}
-
-# Create env files for various shells
-create_env_files() {
-    cat <<'EOF' > "$WASIXCC_DIR/env"
-echo "$PATH" | grep "$HOME/.wasixcc/bin" 2>/dev/null >/dev/null || export PATH="$HOME/.wasixcc/bin:$PATH" 2>/dev/null >/dev/null
-true
-EOF
-    chmod +x "$WASIXCC_DIR/env"
-
-    cat <<'EOF' > "$WASIXCC_DIR/env.nu"
-let bin = $"($env.HOME)/.wasixcc/bin"
-if not ($env.PATH | any {|p| $p == $bin }) {
-  $env.PATH = ([$bin] ++ $env.PATH)
-}
-EOF
-    chmod +x "$WASIXCC_DIR/env.nu"
-
-    cat <<'EOF' > "$WASIXCC_DIR/env.xsh"
-import os
-home = os.path.expanduser("~")
-bin = home + "/.wasixcc/bin"
-if bin not in $PATH:
-    $PATH.insert(0, bin)
-EOF
-    chmod +x "$WASIXCC_DIR/env.xsh"
-}
-
-add_env_files_to_rcs() {
-    # Add env files to various shell rc files
-    # shellcheck disable=SC2016
-    POSIX_BODY='test -f "$HOME/.wasixcc/env" && . "$HOME/.wasixcc/env"'
-    # shellcheck disable=SC2016
-    FISH_BODY='test -f "$HOME/.wasixcc/env" && source "$HOME/.wasixcc/env"'
-    XONSH_BODY="import os
-    p = os.path.expanduser('~/.wasixcc/env.xsh')
-    if os.path.isfile(p):
-        execx(open(p).read(), 'exec', locals(), globals())"
-    NU_BODY="let p = (\$env.HOME | path join '.wasixcc' 'env.nu')
-    if (\$p | path exists) { source \$p }"
-
-    append_block_to_env_file "$HOME/.bashrc" "$POSIX_BODY"
-    append_block_to_env_file "$HOME/.zshrc" "$POSIX_BODY"
-    append_block_to_env_file "$HOME/.kshrc" "$POSIX_BODY"
-    append_block_to_env_file "$HOME/.mkshrc" "$POSIX_BODY"
-    append_block_to_env_file "$HOME/.profile" "$POSIX_BODY"
-    append_block_to_env_file "$HOME/.config/fish/config.fish" "$FISH_BODY"
-    append_block_to_env_file "$HOME/.xonshrc" "$XONSH_BODY"
-    append_block_to_env_file "$HOME/.config/nushell/config.nu" "$NU_BODY"
-}
-
 # Actual script execution starts here
-
-if test -z "$HOME" ; then
-    fail "HOME environment variable is not set."
-fi
 
 find_deps
 detect_target
+download_wasixccenv
 
-download_wasixcc
-install_executables
-download_dependencies
-
-create_env_files
-add_env_files_to_rcs
-
-# shellcheck disable=SC2016
-echo 'wasixcc installed successfully!
-
-To start using wasixcc, please restart your terminal or
-run the appropriate command to source the environment file for your shell:
-
-. ~/.wasixcc/env
-source ~/.wasixcc/env  # For fish
-source $"($nu.home-path)/.wasixcc/env.nu"  # For nushell"
-'
+"$WASIXCCENV" aio-install --sysroot-tag "${WASIXCC_SYSROOT_TAG:-latest}" --llvm-tag "${WASIXCC_LLVM_TAG:-latest}" --binaryen-tag "${WASIXCC_BINARYEN_TAG:-latest}"

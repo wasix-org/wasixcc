@@ -126,6 +126,8 @@ summary is provided here for reference:
 | `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
 | `DISCARD_UNSUPPORTED_FLAGS`     | Some flags that you would use with native tools don't work when targeting WASIX. Discard them. |
 | `AUTOCONF_WORKAROUNDS`          | Attempt to detect autoconf tests and make them work as intended.                               |
+| `LOCATION`                      | The resource dir of wasixcc. Defaults to `~/.wasixcc`                                          |
+| `BIN_LOCATION`                  | Where the wasixcc binaries are installed. Defaults to `LOCATION/bin`                           |
 
 ### Environment Variables
 
