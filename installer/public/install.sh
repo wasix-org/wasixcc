@@ -10,7 +10,7 @@ WASIXCC_SYSROOT_TAG="latest"
 WASIXCC_LLVM_TAG="latest"
 WASIXCC_BINARYEN_TAG="latest"
 
-VERSION="0.3.0"
+VERSION="0.4.0"
 TARGET= # detected in detect_target()
 
 log() {
