@@ -89,11 +89,49 @@ static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-y",
         "-z",
         "--version-script",
+        "--wrap",
+        "--unresolved-symbols",
+        "--undefined",
+        "--trace-symbol",
+        "--threads",
+        "--thinlto-jobs",
+        "--thinlto-cache-policy",
+        "--thinlto-cache-dir",
+        "--soname",
+        "--rsp-quoting",
+        "--reproduce",
+        "--Map",
+        "--keep-section",
+        "--export",
+        "--export-if-defined",
+        "--error-limit",
+        "--entry",
+        "--version-script",
+        "-rpath",
+        "--rpath",
     ]
     .into()
 });
 
-static WASM_LD_FLAGS_WITH_OPTIONAL_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| [].into());
+static WASM_LD_FLAGS_WITH_OPTIONAL_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "--why-extract",
+        "--table-base", // Not optional, but there is no form with a freestanding argument
+        "--max-memory", // Not optional, but there is no form with a freestanding argument
+        "--lto-partitions", // Not optional, but there is no form with a freestanding argument
+        "--initial-memory", // Not optional, but there is no form with a freestanding argument
+        "--initial-heap", // Not optional, but there is no form with a freestanding argument
+        "--import-memory", // Not optional, but there is no form with a freestanding argument
+        "--global-base",
+        "--features",
+        "--extra-features",
+        "--export-memory",
+        "--color-diagnostics",
+        "--build-id",
+        "--allow-undefined-file",
+    ]
+    .into()
+});
 
 // Some common linker flags are unsupported by wasm-ld
 static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
