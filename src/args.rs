@@ -86,7 +86,7 @@ impl Default for BinaryenLocation {
 }
 
 /// Settings provided by user through env vars or -s flags. Some can be overridden by
-/// compiler flags; e.g. `-fno-wasm-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
+/// compiler flags; e.g. `-fno-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
 pub struct UserSettings {
     pub sysroot_location: Option<PathBuf>,      // key name: SYSROOT
