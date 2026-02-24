@@ -62,14 +62,6 @@ inputs:
     required: false
     default: "https://github.com/wasix-org/wasixcc/releases/download"
 
-outputs:
-  wasixcc-path:
-    description: "Path to the wasixcc executable"
-    value: ${{ steps.install-wasixcc.outputs.path }}
-  wasixccenv-path:
-    description: "Path to the wasixccenv executable"
-    value: ${{ steps.install-wasixcc.outputs.wasixccenv_path }}
-
 runs:
   using: "composite"
   steps:
