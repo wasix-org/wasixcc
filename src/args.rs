@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::compiler::{ExceptionStyle, ModuleKind};
+use crate::compiler::{ModuleKind, WasmExceptionStyle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlvmLocation {
@@ -106,8 +106,7 @@ pub struct UserSettings {
     pub wasm_opt_suppress_default: bool,        // key name: WASM_OPT_SUPPRESS_DEFAULT
     pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
     pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
-    pub wasm_exceptions: bool,                  // key name: WASM_EXCEPTIONS=BOOL
-    pub exception_style: ExceptionStyle,        // key name: WASM_EXCEPTIONS=legacy
+    pub wasm_exceptions: WasmExceptionStyle,    // key name: WASM_EXCEPTIONS
     pub pic: bool,                              // key name: PIC
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
@@ -128,21 +127,19 @@ impl UserSettings {
         if let Some(sysroot) = self.sysroot_location.as_deref() {
             Ok(sysroot.to_owned())
         } else {
-            match (self.wasm_exceptions, self.exception_style, self.pic) {
-                (true, ExceptionStyle::Legacy, true) => {
-                    Ok(self.sysroot_prefix.join("sysroot-ehpic"))
-                }
-                (true, ExceptionStyle::Legacy, false) => Ok(self.sysroot_prefix.join("sysroot-eh")),
-                (true, ExceptionStyle::Exnref, true) => {
+            match (self.wasm_exceptions, self.pic) {
+                (WasmExceptionStyle::Legacy, true) => Ok(self.sysroot_prefix.join("sysroot-ehpic")),
+                (WasmExceptionStyle::Legacy, false) => Ok(self.sysroot_prefix.join("sysroot-eh")),
+                (WasmExceptionStyle::Exnref, true) => {
                     Ok(self.sysroot_prefix.join("sysroot-exnref-ehpic"))
                 }
-                (true, ExceptionStyle::Exnref, false) => {
+                (WasmExceptionStyle::Exnref, false) => {
                     Ok(self.sysroot_prefix.join("sysroot-exnref-eh"))
                 }
-                (false, _, true) => {
+                (WasmExceptionStyle::Off, true) => {
                     bail!("PIC without wasm exceptions is not a valid build configuration")
                 }
-                (false, _, false) => Ok(self.sysroot_prefix.join("sysroot")),
+                (WasmExceptionStyle::Off, false) => Ok(self.sysroot_prefix.join("sysroot")),
             }
         }
     }
@@ -311,15 +308,20 @@ pub fn gather_user_settings(
         None => None, // Default to static main
     };
 
-    let (wasm_exceptions, exception_style) =
+    let wasm_exceptions =
         match try_get_user_setting_value("WASM_EXCEPTIONS", args, envs)?.as_deref() {
-            Some("legacy") => (true, ExceptionStyle::Legacy),
-            Some(value) => (
-                read_bool_user_setting(value)
-                    .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?,
-                ExceptionStyle::Exnref,
-            ),
-            None => (true, ExceptionStyle::Exnref),
+            Some("legacy") => WasmExceptionStyle::Legacy,
+            Some("exnref") => WasmExceptionStyle::Exnref,
+            Some(value) => {
+                if read_bool_user_setting(value)
+                    .with_context(|| format!("Invalid value {value} for WASM_EXCEPTIONS"))?
+                {
+                    WasmExceptionStyle::Exnref
+                } else {
+                    WasmExceptionStyle::Off
+                }
+            }
+            None => WasmExceptionStyle::Exnref,
         };
 
     let pic = match try_get_user_setting_value("PIC", args, envs)? {
@@ -380,7 +382,6 @@ pub fn gather_user_settings(
         wasm_opt_preserve_unoptimized,
         module_kind,
         wasm_exceptions,
-        exception_style,
         pic,
         link_symbolic,
         generate_shell_script,
@@ -562,8 +563,7 @@ mod tests {
             vec!["m".to_string(), "n".to_string()]
         );
         assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
-        assert_eq!(settings.wasm_exceptions, true);
-        assert_eq!(settings.exception_style, ExceptionStyle::Exnref);
+        assert_eq!(settings.wasm_exceptions, WasmExceptionStyle::Exnref);
         assert!(!settings.pic);
     }
 }
