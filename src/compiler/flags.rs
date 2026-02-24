@@ -1,7 +1,7 @@
 use crate::{
     args::UserSettings,
     compiler::{
-        BuildSettings, DebugLevel, ExceptionStyle, ModuleKind, OptLevel, PreparedArgs,
+        BuildSettings, DebugLevel, ModuleKind, OptLevel, PreparedArgs, WasmExceptionStyle,
         response_file,
     },
 };
@@ -167,8 +167,10 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-g1") => build_settings.debug_level = DebugLevel::G1,
         Flag::Simple("-g2" | "-g") => build_settings.debug_level = DebugLevel::G2,
         Flag::Simple("-g3") => build_settings.debug_level = DebugLevel::G3,
-        Flag::Simple("-fwasm-exceptions") => user_settings.wasm_exceptions = true,
-        Flag::Simple("-fno-exceptions") => user_settings.wasm_exceptions = false,
+        Flag::Simple("-fwasm-exceptions") => {
+            user_settings.wasm_exceptions = WasmExceptionStyle::Exnref
+        }
+        Flag::Simple("-fno-exceptions") => user_settings.wasm_exceptions = WasmExceptionStyle::Off,
         Flag::Simple("-fPIC") => user_settings.pic = true,
         Flag::Simple("-fno-PIC") => user_settings.pic = false,
         Flag::Simple("--wasm-opt") => build_settings.use_wasm_opt = true,
@@ -186,9 +188,6 @@ fn update_build_settings_from_compiler_flag(
                 user_settings.module_kind = Some(ModuleKind::DynamicMain);
             }
         }
-        Flag::WithValue("-mllvm", value, _) => {
-            update_build_settings_from_llvm_arg(value, user_settings);
-        }
         _ => {}
     }
 }
@@ -205,22 +204,6 @@ fn update_build_settings_from_linker_flag(linker_flag: &Flag, user_settings: &mu
             if user_settings.module_kind.is_none() {
                 user_settings.module_kind = Some(ModuleKind::DynamicMain);
             }
-        }
-        Flag::WithValue("-mllvm", value, _) => {
-            update_build_settings_from_llvm_arg(value, user_settings);
-        }
-        _ => {}
-    }
-}
-
-// Update the build settings based on a standalone llvm argument
-fn update_build_settings_from_llvm_arg(arg: &str, user_settings: &mut UserSettings) {
-    match arg {
-        "--wasm-use-legacy-eh" | "--wasm-use-legacy-eh=true" => {
-            user_settings.exception_style = ExceptionStyle::Legacy;
-        }
-        "--wasm-use-legacy-eh=false" => {
-            user_settings.exception_style = ExceptionStyle::Exnref;
         }
         _ => {}
     }
@@ -491,7 +474,7 @@ pub(super) fn prepare_linker_args(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UserSettings, compiler::flags::lexer::Separator};
+    use crate::UserSettings;
     use std::path::PathBuf;
 
     #[test]
@@ -512,17 +495,16 @@ mod tests {
             &mut bs,
             &mut us,
         );
-        assert_eq!(us.wasm_exceptions, true);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
         update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
-        assert_eq!(us.wasm_exceptions, false);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Off);
         us = UserSettings::default();
         update_build_settings_from_compiler_flag(
             Flag::Simple("-fwasm-exceptions"),
             &mut bs,
             &mut us,
         );
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
-        assert_eq!(us.wasm_exceptions, true);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
 
         // update_build_settings_from_compiler_flag should NOT override the exception style based on a linker setting.
         update_build_settings_from_compiler_flag(
@@ -530,25 +512,11 @@ mod tests {
             &mut bs,
             &mut us,
         );
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
-
-        // update_build_settings_from_compiler_flag should override the exception style based on a compiler setting.
-        update_build_settings_from_compiler_flag(
-            Flag::WithValue("-mllvm", "--wasm-use-legacy-eh=true", Separator::Space),
-            &mut bs,
-            &mut us,
-        );
-        assert_eq!(us.exception_style, ExceptionStyle::Legacy);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
 
         // Verify toggling eh kind is still saved after disabling EH in general
         update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
-        assert_eq!(us.exception_style, ExceptionStyle::Legacy);
-        update_build_settings_from_compiler_flag(
-            Flag::WithValue("-mllvm", "--wasm-use-legacy-eh=false", Separator::Space),
-            &mut bs,
-            &mut us,
-        );
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Off);
     }
 
     #[test]
@@ -583,7 +551,7 @@ mod tests {
         assert_eq!(pa.compiler_args, vec!["-O2".to_string()]);
         assert_eq!(bs.opt_level, OptLevel::O2);
         // -fwasm-exceptions side-effect should still take effect even though the flag is discarded
-        assert_eq!(us.wasm_exceptions, true);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
         assert!(pa.linker_args.is_empty());
         assert_eq!(
             pa.compiler_inputs,
@@ -649,7 +617,7 @@ mod tests {
         assert_eq!(bs.opt_level, OptLevel::O2);
         assert_eq!(bs.debug_level, DebugLevel::G0);
         assert!(!bs.use_wasm_opt);
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
         assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
         assert_eq!(
             pa.linker_args,

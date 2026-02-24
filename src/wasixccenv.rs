@@ -339,11 +339,15 @@ The following configuration options are available:
                            `-mllvm --wasm-use-legacy-eh=true` is passed to
                            the compiler or linker. Valid values are:
                            * yes (default): Enable exception handling support using
-                                 the standardized exnref proposal.
+                               the standardized exnref proposal.
                            * no: No exception handling support.
+                           * exnref: Same as 'yes'.
                            * legacy: Enable legacy exception handling support,
-                                 which is compatible with engines that don't
-                                 support the standardized exnref proposal.
+                               which is compatible with engines that don't
+                               support the standardized exnref proposal. By
+                               default, wasm-opt is then used to transform
+                               the resulting module into one that uses exnref-
+                               based EH.
   PIC=<BOOL>               Whether to enable position-independent code (PIC),
                            required for dynamic linking. PIC will be enabled
                            if module kind is `dynamic-main` or `shared-library`,

@@ -50,13 +50,21 @@ impl ModuleKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ExceptionStyle {
-    // Generate object files with the standardized exnref EH proposal
-    #[default]
-    Exnref,
-    // Generate object files with the legacy EH proposal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WasmExceptionStyle {
+    Off,
     Legacy,
+    Exnref,
+}
+
+impl WasmExceptionStyle {
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, WasmExceptionStyle::Off)
+    }
+
+    pub fn is_legacy(&self) -> bool {
+        matches!(self, WasmExceptionStyle::Legacy)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,40 +302,24 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
 
-    match (
-        state.user_settings.wasm_exceptions,
-        state.user_settings.exception_style,
-    ) {
-        (true, ExceptionStyle::Exnref) => {
-            command_args.push(OsStr::new("-fwasm-exceptions"));
+    if state.user_settings.wasm_exceptions.is_enabled() {
+        command_args.push(OsStr::new("-fwasm-exceptions"));
 
+        command_args.push(OsStr::new("-mllvm"));
+        command_args.push(OsStr::new("--wasm-enable-eh"));
+
+        command_args.push(OsStr::new("-mllvm"));
+        command_args.push(OsStr::new("--wasm-enable-sjlj"));
+
+        if state.user_settings.wasm_exceptions.is_legacy() {
             command_args.push(OsStr::new("-mllvm"));
-            command_args.push(OsStr::new("--wasm-enable-eh"));
-
-            command_args.push(OsStr::new("-mllvm"));
-            command_args.push(OsStr::new("--wasm-enable-sjlj"));
-
+            command_args.push(OsStr::new("--wasm-use-legacy-eh=true"));
+        } else {
             command_args.push(OsStr::new("-mllvm"));
             command_args.push(OsStr::new("--wasm-use-legacy-eh=false"));
         }
-        (true, ExceptionStyle::Legacy) => {
-            command_args.push(OsStr::new("-fwasm-exceptions"));
-
-            command_args.push(OsStr::new("-mllvm"));
-            command_args.push(OsStr::new("--wasm-enable-sjlj"));
-
-            command_args.push(OsStr::new("-mllvm"));
-            command_args.push(OsStr::new("--wasm-use-legacy-eh=true"));
-
-            if state.cxx {
-                // Enable C++ exceptions as well
-                command_args.push(OsStr::new("-mllvm"));
-                command_args.push(OsStr::new("--wasm-enable-eh"));
-            }
-        }
-        (false, _) => {
-            command_args.push(OsStr::new("-fno-exceptions"));
-        }
+    } else {
+        command_args.push(OsStr::new("-fno-exceptions"));
     }
 
     if state.user_settings.module_kind().requires_pic() || state.user_settings.pic {
@@ -417,28 +409,18 @@ fn link_inputs(state: &State) -> Result<()> {
         "--export=__wasm_call_ctors",
     ]);
 
-    match (
-        state.user_settings.wasm_exceptions,
-        state.user_settings.exception_style,
-    ) {
-        (true, ExceptionStyle::Exnref) => {
-            command.args(["-mllvm", "--wasm-enable-eh"]);
-            command.args(["-mllvm", "--wasm-enable-sjlj"]);
-            // Don't use legacy EH
-            command.args(["-mllvm", "--wasm-use-legacy-eh=false"]);
-            // Use native wasm exceptions
-            command.args(["-mllvm", "--exception-model=wasm"]);
-        }
-        (true, ExceptionStyle::Legacy) => {
-            command.args(["-mllvm", "--wasm-enable-sjlj"]);
-            // Use legacy EH
-            command.args(["-mllvm", "--wasm-use-legacy-eh=true"]);
+    if state.user_settings.wasm_exceptions.is_enabled() {
+        command.args(["-mllvm", "--wasm-enable-eh"]);
+        command.args(["-mllvm", "--wasm-enable-sjlj"]);
 
-            if state.cxx {
-                command.args(["-mllvm", "--wasm-enable-eh"]);
-            }
+        if state.user_settings.wasm_exceptions.is_legacy() {
+            command.args(["-mllvm", "--wasm-use-legacy-eh=true"]);
+        } else {
+            command.args(["-mllvm", "--wasm-use-legacy-eh=false"]);
         }
-        (false, _) => {}
+
+        // Use native wasm exceptions
+        command.args(["-mllvm", "--exception-model=wasm"]);
     }
 
     let module_kind = state.user_settings.module_kind();
@@ -491,7 +473,7 @@ fn link_inputs(state: &State) -> Result<()> {
 
         if state.cxx || state.user_settings.include_cpp_symbols {
             command.args(["-lc++", "-lc++abi"]);
-            if state.user_settings.wasm_exceptions {
+            if state.user_settings.wasm_exceptions.is_enabled() {
                 command.arg("-lunwind");
             }
         }
@@ -559,18 +541,15 @@ fn run_wasm_opt(state: &State) -> Result<()> {
     );
 
     if !state.user_settings.wasm_opt_suppress_default {
-        match (
-            state.user_settings.wasm_exceptions,
-            state.user_settings.exception_style,
-        ) {
-            (true, ExceptionStyle::Exnref) => {
+        match state.user_settings.wasm_exceptions {
+            WasmExceptionStyle::Exnref => {
                 // No conversion to exnref needed
             }
-            (true, ExceptionStyle::Legacy) => {
+            WasmExceptionStyle::Legacy => {
                 // Convert old eh to new exnref
                 command.arg("--emit-exnref");
             }
-            (false, _) => {
+            WasmExceptionStyle::Off => {
                 command.arg("--asyncify");
             }
         }
@@ -753,52 +732,41 @@ mod tests {
             sysroot_prefix: PathBuf::from("/xxx"),
             ..Default::default()
         };
-        assert_eq!(us.wasm_exceptions, true);
-        assert_eq!(us.exception_style, ExceptionStyle::Exnref);
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-exnref-eh")
         );
 
-        us.wasm_exceptions = true;
-        us.exception_style = ExceptionStyle::Legacy;
+        us.wasm_exceptions = WasmExceptionStyle::Legacy;
+
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-eh")
         );
 
-        us.wasm_exceptions = false;
-        us.exception_style = ExceptionStyle::Exnref;
-        assert_eq!(
-            us.sysroot_location().unwrap(),
-            PathBuf::from("/xxx/sysroot")
-        );
-
-        us.wasm_exceptions = false;
-        us.exception_style = ExceptionStyle::Legacy;
+        us.wasm_exceptions = WasmExceptionStyle::Off;
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot")
         );
 
         us.pic = true;
-        us.wasm_exceptions = true;
-        us.exception_style = ExceptionStyle::Exnref;
+        us.wasm_exceptions = WasmExceptionStyle::Exnref;
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-exnref-ehpic")
         );
 
         us.pic = true;
-        us.wasm_exceptions = true;
-        us.exception_style = ExceptionStyle::Legacy;
+        us.wasm_exceptions = WasmExceptionStyle::Legacy;
         assert_eq!(
             us.sysroot_location().unwrap(),
             PathBuf::from("/xxx/sysroot-ehpic")
         );
 
         us.pic = true;
-        us.wasm_exceptions = false;
+        us.wasm_exceptions = WasmExceptionStyle::Off;
         assert!(us.sysroot_location().is_err());
 
         us.sysroot_location = Some(PathBuf::from("/yyy"));
