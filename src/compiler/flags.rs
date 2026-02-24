@@ -188,9 +188,6 @@ fn update_build_settings_from_compiler_flag(
                 user_settings.module_kind = Some(ModuleKind::DynamicMain);
             }
         }
-        Flag::WithValue("-mllvm", value, _) => {
-            update_build_settings_from_llvm_arg(value, user_settings);
-        }
         _ => {}
     }
 }
@@ -207,22 +204,6 @@ fn update_build_settings_from_linker_flag(linker_flag: &Flag, user_settings: &mu
             if user_settings.module_kind.is_none() {
                 user_settings.module_kind = Some(ModuleKind::DynamicMain);
             }
-        }
-        Flag::WithValue("-mllvm", value, _) => {
-            update_build_settings_from_llvm_arg(value, user_settings);
-        }
-        _ => {}
-    }
-}
-
-// Update the build settings based on a standalone llvm argument
-fn update_build_settings_from_llvm_arg(arg: &str, user_settings: &mut UserSettings) {
-    match arg {
-        "--wasm-use-legacy-eh" | "--wasm-use-legacy-eh=true" => {
-            user_settings.wasm_exceptions = WasmExceptionStyle::Legacy;
-        }
-        "--wasm-use-legacy-eh=false" => {
-            user_settings.wasm_exceptions = WasmExceptionStyle::Exnref;
         }
         _ => {}
     }
