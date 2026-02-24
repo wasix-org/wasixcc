@@ -1,12 +1,13 @@
 use crate::{
     args::{UserSettings, gather_user_settings},
-    download::{self, TagSpec},
     wasixccenv::shell_env::{install_env_files, setup_shell_rcs},
 };
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use download::TagSpec;
 use std::path::{Path, PathBuf};
 
+mod download;
 mod shell_env;
 
 #[cfg(unix)]
