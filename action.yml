@@ -32,6 +32,11 @@ inputs:
     required: false
     default: "latest"
 
+  libtool-tag:
+    description: "Tag/version of libtool to install (e.g., v2.6.0, latest)."
+    required: false
+    default: "latest"
+
   install-sysroot:
     description: "Whether to install the WASIX sysroot (true/false)"
     required: false
@@ -213,7 +218,7 @@ runs:
         rm wasixcc.tar.gz
         
         chmod +x "wasixccenv"
-        ./wasixccenv aio-install --add-to-shell=false --sysroot-tag "${{ inputs.sysroot-tag }}" --llvm-tag "${{ inputs.llvm-tag }}" --binaryen-tag "${{ inputs.binaryen-tag }}"
+        ./wasixccenv aio-install --add-to-shell=false --sysroot-tag "${{ inputs.sysroot-tag }}" --llvm-tag "${{ inputs.llvm-tag }}" --binaryen-tag "${{ inputs.binaryen-tag }}" --libtool-tag "${{ inputs.libtool-tag }}"
         ./wasixccenv print-path >> $GITHUB_PATH
         rm -rf "wasixccenv" # Got copied during aio-install, can be removed
 

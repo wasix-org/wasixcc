@@ -56,6 +56,12 @@ enum WasixccCommand {
         /// specific tag starting with 'v'. Defaults to 'latest'.
         tag: Option<TagSpec>,
     },
+    /// Download libtool (Unix only)
+    DownloadLibtool {
+        /// The tag from which to download libtool, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        tag: Option<TagSpec>,
+    },
     /// Download and install everything
     DownloadAll {
         #[arg(long)]
@@ -70,6 +76,10 @@ enum WasixccCommand {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
+        #[arg(long)]
+        /// The tag from which to download libtool, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        libtool_tag: Option<TagSpec>,
     },
     /// Install wasixcc into the home of the current user.
     ///
@@ -87,6 +97,10 @@ enum WasixccCommand {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
+        #[arg(long)]
+        /// The tag from which to download libtool, either 'latest' or a
+        /// specific tag starting with 'v'. Defaults to 'latest'.
+        libtool_tag: Option<TagSpec>,
         #[arg(long, num_args = 1, default_value_t = true)]
         /// Whether to add sourcing of the wasixcc env files to existing shell rc files. Defaults to true.
         add_to_shell: bool,
@@ -104,6 +118,9 @@ enum WasixccCommand {
         #[arg(long, num_args = 1, default_value_t = false)]
         /// Whether to add the binaryen bin directory to the printed PATH
         binaryen: bool,
+        #[arg(long, num_args = 1, default_value_t = false)]
+        /// Whether to add the libtool bin directory to the printed PATH
+        libtool: bool,
     },
     /// Print help information about wasixcc configuration options
     HelpConfig,
@@ -141,20 +158,26 @@ pub(crate) fn run() -> Result<()> {
         WasixccCommand::DownloadBinaryen { tag } => {
             download_binaryen(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
+        WasixccCommand::DownloadLibtool { tag } => {
+            download_libtool(tag.unwrap_or(TagSpec::Latest), &user_settings)
+        }
         WasixccCommand::DownloadAll {
             binaryen_tag,
             llvm_tag,
             sysroot_tag,
+            libtool_tag,
         } => {
             download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_libtool(libtool_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             Ok(())
         }
         WasixccCommand::AioInstall {
             binaryen_tag,
             llvm_tag,
             sysroot_tag,
+            libtool_tag,
             add_to_shell,
         } => {
             let home =
@@ -168,6 +191,7 @@ pub(crate) fn run() -> Result<()> {
             download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_libtool(libtool_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
 
             install_executables(&user_settings, &installer_path, false)?;
 
@@ -205,7 +229,8 @@ source {env_nu_shell}  # For nushell"
             wasixcc,
             llvm,
             binaryen,
-        } => print_path(&user_settings, wasixcc, llvm, binaryen),
+            libtool,
+        } => print_path(&user_settings, wasixcc, llvm, binaryen, libtool),
         WasixccCommand::HelpConfig => {
             print_configuration_help();
             Ok(())
@@ -232,6 +257,11 @@ pub fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<
 pub fn download_binaryen(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading binaryen: {:?}", tag_spec);
     download::download_binaryen(tag_spec, user_settings)
+}
+
+pub fn download_libtool(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
+    tracing::info!("Downloading libtool: {:?}", tag_spec);
+    download::download_libtool(tag_spec, user_settings)
 }
 
 // Install the current wasixccenv binary to the specified path
@@ -345,7 +375,13 @@ fn print_sysroot(user_settings: &UserSettings) -> Result<()> {
     Ok(())
 }
 
-fn print_path(user_settings: &UserSettings, wasix: bool, llvm: bool, binaryen: bool) -> Result<()> {
+fn print_path(
+    user_settings: &UserSettings,
+    wasix: bool,
+    llvm: bool,
+    binaryen: bool,
+    libtool: bool,
+) -> Result<()> {
     let mut paths = Vec::new();
     if wasix {
         paths.push(
@@ -362,6 +398,10 @@ fn print_path(user_settings: &UserSettings, wasix: bool, llvm: bool, binaryen: b
     if binaryen && let Some(bin_dir) = user_settings.binaryen_location.get_bin_dir() {
         paths.push(bin_dir.to_string_lossy().to_string());
     }
+    if libtool && let Some(bin_dir) = user_settings.libtool_location.get_bin_dir() {
+        paths.push(bin_dir.to_string_lossy().to_string());
+    }
+
     // Intentionally use `print!` (no trailing newline) so this raw PATH value can be
     // consumed reliably by scripts and CI environments (e.g. piping to $GITHUB_PATH).
     print!("{}", paths.join(":"));

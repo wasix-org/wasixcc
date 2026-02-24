@@ -4,11 +4,12 @@ use anyhow::{Context, bail};
 use fs_extra::dir::CopyOptions;
 use reqwest::header::HeaderMap;
 
-use crate::args::{BinaryenLocation, LlvmLocation, UserSettings};
+use crate::args::{BinaryenLocation, LibtoolLocation, LlvmLocation, UserSettings};
 
 const LLVM_REPO: &str = "wasix-org/llvm-project";
 const SYSROOT_REPO: &str = "wasix-org/wasix-libc";
 const BINARYEN_REPO: &str = "WebAssembly/binaryen";
+const LIBTOOL_REPO: &str = "wasix-org/libtool";
 
 /// Creates a TLS configuration using system certificates with fallback to bundled certs.
 static CRYPTO_PROVIDER_LOCK: OnceLock<()> = OnceLock::new();
@@ -87,6 +88,44 @@ fn get_binaryen_asset_suffix() -> anyhow::Result<&'static str> {
         ("macos", "aarch64") => Ok("-arm64-macos.tar.gz"),
         (os, arch) => {
             bail!("Binaryen download for {} on {} is not supported", os, arch)
+        }
+    }
+}
+
+fn get_libtool_asset_name() -> anyhow::Result<&'static str> {
+    // We need to get the linker type at runtime, as our binaries are static and alwasy against musl, so we can't differentiate there.
+    let linker = std::process::Command::new("ldd")
+        .arg("--version")
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .to_string()
+                .to_lowercase()
+        })
+        .ok()
+        .map(|output| {
+            if output.contains("musl") {
+                "musl"
+            } else {
+                "gnu"
+            }
+        })
+        .unwrap_or("darwin");
+
+    match (std::env::consts::OS, std::env::consts::ARCH, linker) {
+        ("linux", "x86_64", "gnu") => Ok("libtool-x86_64-unknown-linux-gnu.tar.gz"),
+        ("linux", "aarch64", "gnu") => Ok("libtool-aarch64-unknown-linux-gnu.tar.gz"),
+        ("linux", "x86_64", "musl") => Ok("libtool-x86_64-unknown-linux-musl.tar.gz"),
+        // ("linux", "aarch64", "musl") => Ok("libtool-aarch64-unknown-linux-musl.tar.gz"),
+        ("macos", "x86_64", "darwin") => Ok("libtool-x86_64-apple-darwin.tar.gz"),
+        ("macos", "aarch64", "darwin") => Ok("libtool-aarch64-apple-darwin.tar.gz"),
+        (os, arch, linker) => {
+            bail!(
+                "Binaryen download for {} on {} ({} linker) is not supported",
+                os,
+                arch,
+                linker
+            )
         }
     }
 }
@@ -331,6 +370,79 @@ pub(crate) fn download_binaryen(
 
     eprintln!(
         "Downloaded binaryen asset '{}' to '{}'",
+        asset.name,
+        target_dir.display()
+    );
+
+    Ok(())
+}
+
+pub(crate) fn download_libtool(
+    tag_spec: TagSpec,
+    user_settings: &UserSettings,
+) -> anyhow::Result<()> {
+    // Determine the asset name based on OS and architecture
+    let asset_name = get_libtool_asset_name()?;
+
+    let target_dir = match user_settings.libtool_location {
+        LibtoolLocation::DefaultPath(ref path) | LibtoolLocation::UserProvided(ref path) => path,
+    };
+
+    if !target_dir.exists() {
+        std::fs::create_dir_all(target_dir).with_context(|| {
+            format!(
+                "Failed to create LLVM directory at {}",
+                target_dir.display()
+            )
+        })?;
+    }
+    let target_dir = target_dir.to_path_buf();
+
+    let client = create_github_client()?;
+    let release_url = format!(
+        "https://api.github.com/repos/{LIBTOOL_REPO}/releases/{}",
+        tag_spec.display_github_url_postfix()
+    );
+
+    eprintln!("Retrieving release info from {release_url} ...");
+
+    let release: GithubReleaseData = client
+        .get(&release_url)
+        .send()?
+        .error_for_status()
+        .context("Could not download release info")?
+        .json()
+        .context("Could not deserialize release info")?;
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|a| a.name == asset_name)
+        .with_context(|| format!("Could not find asset '{asset_name}' in release"))?;
+
+    download_asset(asset, &target_dir, &client)
+        .with_context(|| format!("Failed to download and unpack sysroot asset '{asset_name}'"))?;
+
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for entry in
+            std::fs::read_dir(target_dir.join("bin")).context("Failed to read bin directory")?
+        {
+            let entry = entry.context("Failed to read bin directory entry")?;
+            if entry
+                .file_type()
+                .context("Failed to get file type of bin directory entry")?
+                .is_file()
+            {
+                let mut perms = entry.metadata()?.permissions();
+                perms.set_mode(perms.mode() | 0o110); // Set executable bits
+                std::fs::set_permissions(entry.path(), perms)?;
+            }
+        }
+    }
+
+    eprintln!(
+        "Downloaded libtool asset '{}' to '{}'",
         asset.name,
         target_dir.display()
     );

@@ -115,6 +115,37 @@ impl Default for BinaryenLocation {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LibtoolLocation {
+    UserProvided(PathBuf),
+    DefaultPath(PathBuf),
+}
+
+impl LibtoolLocation {
+    pub fn get_bin_dir(&self) -> Option<PathBuf> {
+        match self {
+            // Never override a user-provided path...
+            Self::UserProvided(path) => Some(path.join("bin")),
+
+            // ... but a default path with fallbacks is generally acceptable.
+            Self::DefaultPath(path) => {
+                if path.join("bin").exists() {
+                    Some(path.join("bin"))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for LibtoolLocation {
+    fn default() -> Self {
+        LibtoolLocation::DefaultPath(PathBuf::new())
+    }
+}
+
 /// Settings provided by user through env vars or -s flags. Some can be overridden by
 /// compiler flags; e.g. `-fno-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
@@ -123,6 +154,7 @@ pub struct UserSettings {
     pub sysroot_prefix: PathBuf,                // key name: SYSROOT_PREFIX
     pub llvm_location: LlvmLocation,            // key name: LLVM_LOCATION
     pub binaryen_location: BinaryenLocation,    // key name: BINARYEN_LOCATION
+    pub libtool_location: LibtoolLocation,      // key name: LIBTOOL_LOCATION
     pub extra_compiler_flags: Vec<String>,      // key name: COMPILER_FLAGS
     pub extra_compiler_post_flags: Vec<String>, // key name: COMPILER_POST_FLAGS
     pub extra_compiler_flags_c: Vec<String>,    // key name: COMPILER_FLAGS_C
@@ -250,6 +282,11 @@ pub fn gather_user_settings(
     let bin_location = match try_get_user_setting_value("BIN_LOCATION", args, envs)? {
         Some(path) => PathBuf::from(path),
         None => location.join("bin"),
+    };
+
+    let libtool_location = match try_get_user_setting_value("LIBTOOL_LOCATION", args, envs)? {
+        Some(path) => LibtoolLocation::UserProvided(PathBuf::from(path)),
+        None => LibtoolLocation::DefaultPath(location.join("libtool")),
     };
 
     let binaryen_location = match try_get_user_setting_value("BINARYEN_LOCATION", args, envs)? {
@@ -414,6 +451,7 @@ pub fn gather_user_settings(
         sysroot_prefix,
         llvm_location,
         binaryen_location,
+        libtool_location,
         extra_compiler_flags,
         extra_compiler_post_flags,
         extra_compiler_flags_c,
