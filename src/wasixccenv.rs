@@ -86,6 +86,9 @@ enum WasixccCommand {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
+        #[arg(long, num_args = 1, default_value_t = true)]
+        /// Whether to add sourcing of the wasixcc env files to existing shell rc files. Defaults to true.
+        add_to_shell: bool,
     },
     /// Print the sysroot location according to current configuration
     PrintSysroot,
@@ -151,6 +154,7 @@ pub(crate) fn run() -> Result<()> {
             binaryen_tag,
             llvm_tag,
             sysroot_tag,
+            add_to_shell,
         } => {
             let home =
                 std::env::home_dir().context("Failed to get current user's home directory")?;
@@ -167,7 +171,10 @@ pub(crate) fn run() -> Result<()> {
             install_executables(&user_settings, &installer_path, false)?;
 
             install_env_files(&user_settings.location)?;
-            setup_shell_rcs(&home)?;
+
+            if add_to_shell {
+                setup_shell_rcs(&home)?;
+            }
 
             let wasixcc_location = user_settings.location.to_string_lossy().to_string();
             let env_posix_shell =
