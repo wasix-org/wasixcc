@@ -160,7 +160,7 @@ runs:
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Download wasixcc binary
+    - name: Download wasixccenv
       id: download
       shell: sh
       env:
@@ -187,79 +187,14 @@ runs:
       run: |
         tar -xzf wasixcc.tar.gz
         rm wasixcc.tar.gz
-
-        WASIXCC_HOME="$HOME/.wasixcc"
+        
         chmod +x "wasixccenv"
-        mkdir -p "$WASIXCC_HOME"
-        mv wasixccenv "$WASIXCC_HOME/"
-        echo "wasixccenv_path=$WASIXCC_HOME/wasixccenv" >> $GITHUB_OUTPUT
-
-        # Install executables (wasix++, wasixar, etc.) to bin directory
-        mkdir -p "$WASIXCC_HOME/bin"
-        "$WASIXCC_HOME/wasixccenv" install-executables "$WASIXCC_HOME/bin"
-        echo "$WASIXCC_HOME/bin" >> $GITHUB_PATH
-        echo "path=$WASIXCC_HOME/bin/wasixcc" >> $GITHUB_OUTPUT
-
-    - name: Install binaryen
-      if: inputs.install-binaryen == 'true'
-      shell: sh
-      env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-      run: |
-        if [ "${{ inputs.binaryen-tag }}" = "latest" ]; then
-          wasixccenv download-binaryen
-        else
-          wasixccenv download-binaryen "${{ inputs.binaryen-tag }}"
-        fi
-
-        if [ "${{ inputs.add-binaryen-path }}" = "true" ]; then
-          BINARYEN_BIN="$HOME/.wasixcc/binaryen/bin"
-          if [ -d "$BINARYEN_BIN" ]; then
-            printf "%s\n" "$BINARYEN_BIN" >> $GITHUB_PATH
-            echo "Added binaryen to PATH: $BINARYEN_BIN"
-          else
-            echo "Error: Could not find binaryen installation directory at $BINARYEN_BIN"
-            exit 1
-          fi
-        fi
-
-    - name: Install WASIX sysroot
-      if: inputs.install-sysroot == 'true'
-      shell: sh
-      env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-      run: |
-        if [ "${{ inputs.sysroot-tag }}" = "latest" ]; then
-          wasixccenv download-sysroot
-        else
-          wasixccenv download-sysroot "${{ inputs.sysroot-tag }}"
-        fi
-
-    - name: Install LLVM toolchain
-      if: inputs.install-llvm == 'true'
-      shell: sh
-      env:
-        GITHUB_TOKEN: ${{ inputs.github_token }}
-      run: |
-        if [ "${{ inputs.llvm-tag }}" = "latest" ]; then
-          wasixccenv download-llvm
-        else
-          wasixccenv download-llvm "${{ inputs.llvm-tag }}"
-        fi
-
-        if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
-          LLVM_BIN="$HOME/.wasixcc/llvm/bin"
-          if [ -d "$LLVM_BIN" ]; then
-            printf "%s\n" "$LLVM_BIN" >> $GITHUB_PATH
-            echo "Added LLVM toolchain to PATH: $LLVM_BIN"
-          else
-            echo "Error: Could not find LLVM installation directory at $LLVM_BIN"
-            exit 1
-          fi
-        fi
+        ./wasixccenv aio-install --add-to-shell=false --sysroot-tag "${{ inputs.sysroot-tag }}" --llvm-tag "${{ inputs.llvm-tag }}" --binaryen-tag "${{ inputs.binaryen-tag }}"
+        ./wasixccenv print-path >> $GITHUB_PATH
+        rm -rf "wasixccenv" # Got copied during aio-install, can be removed
 
     - name: Verify installation
       shell: sh
       run: |
-        echo "wasixcc version:"
         wasixccenv --version
+        wasixcc --version
