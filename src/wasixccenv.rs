@@ -212,7 +212,7 @@ source {env_nu_shell}  # For nushell"
         WasixccCommand::InstallEnvFiles => install_env_files(&user_settings.location),
         WasixccCommand::SetupShellRcs { home } => setup_shell_rcs(
             &home
-                .or_else(|| std::env::home_dir())
+                .or_else(std::env::home_dir)
                 .context("Failed to get current user's home directory")?,
         ),
     }
@@ -239,9 +239,9 @@ fn install_wasixccenv(bin_dir: &Path, wasixccenv: &Path, symlink: bool) -> Resul
     let exe_path = wasixccenv;
 
     if symlink {
-        symlink_executable(&exe_path, &target_path)?;
+        symlink_executable(exe_path, &target_path)?;
     } else {
-        copy_executable(&exe_path, &target_path)?;
+        copy_executable(exe_path, &target_path)?;
     }
 
     Ok(target_path)
@@ -261,7 +261,7 @@ fn install_executables(
     use std::fs;
     let bin_dir = &user_settings.bin_location;
 
-    fs::create_dir_all(&bin_dir)
+    fs::create_dir_all(bin_dir)
         .with_context(|| format!("Failed to create directory at {bin_dir:?}"))?;
 
     let relative_wasixccenv = PathBuf::from("./wasixccenv");
@@ -278,7 +278,7 @@ fn install_executables(
     }
 
     // For wasixccenv itself, symlink or copy depending on what was requested.
-    install_wasixccenv(&bin_dir, &wasixccenv, symlink_wasixccenv)?;
+    install_wasixccenv(bin_dir, wasixccenv, symlink_wasixccenv)?;
 
     Ok(())
 }
@@ -308,7 +308,7 @@ fn copy_executable(original: &Path, link: &Path) -> Result<()> {
     }
 
     if link.exists() {
-        std::fs::remove_file(&link)
+        std::fs::remove_file(link)
             .with_context(|| format!("Failed to remove existing wasixccenv at {link:?}"))?;
     }
 
