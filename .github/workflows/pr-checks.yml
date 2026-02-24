@@ -98,7 +98,7 @@ jobs:
       - name: Download toolchain and sysroot
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./target/release/wasixccenv aio-install ./target/release
+        run: WASIXCC_BIN_LOCATION=./target/release ./target/release/wasixccenv aio-install
 
       - name: Test compilation
         run: |
