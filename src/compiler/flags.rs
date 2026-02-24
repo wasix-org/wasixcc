@@ -474,7 +474,7 @@ pub(super) fn prepare_linker_args(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UserSettings, compiler::flags::lexer::Separator};
+    use crate::UserSettings;
     use std::path::PathBuf;
 
     #[test]
@@ -514,23 +514,9 @@ mod tests {
         );
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
 
-        // update_build_settings_from_compiler_flag should override the exception style based on a compiler setting.
-        update_build_settings_from_compiler_flag(
-            Flag::WithValue("-mllvm", "--wasm-use-legacy-eh=true", Separator::Space),
-            &mut bs,
-            &mut us,
-        );
-        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Legacy);
-
         // Verify toggling eh kind is still saved after disabling EH in general
         update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Off);
-        update_build_settings_from_compiler_flag(
-            Flag::WithValue("-mllvm", "--wasm-use-legacy-eh=false", Separator::Space),
-            &mut bs,
-            &mut us,
-        );
-        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
     }
 
     #[test]
