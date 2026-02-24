@@ -89,6 +89,18 @@ enum WasixccCommand {
     },
     /// Print the sysroot location according to current configuration
     PrintSysroot,
+    /// Print the PATHs to the various installed binary directories.
+    PrintPath {
+        #[arg(long, num_args = 1, default_value_t = true)]
+        /// Whether to add the wasixcc bin directory to the printed PATH
+        wasixcc: bool,
+        #[arg(long, num_args = 1, default_value_t = false)]
+        /// Whether to add the LLVM toolchain bin directory to the printed PATH
+        llvm: bool,
+        #[arg(long, num_args = 1, default_value_t = false)]
+        /// Whether to add the binaryen bin directory to the printed PATH
+        binaryen: bool,
+    },
     /// Print help information about wasixcc configuration options
     HelpConfig,
     /// Install sourceable env files to the wasixcc location
@@ -181,6 +193,11 @@ source {env_nu_shell}  # For nushell"
             Ok(())
         }
         WasixccCommand::PrintSysroot => print_sysroot(&user_settings),
+        WasixccCommand::PrintPath {
+            wasixcc,
+            llvm,
+            binaryen,
+        } => print_path(&user_settings, wasixcc, llvm, binaryen),
         WasixccCommand::HelpConfig => {
             print_configuration_help();
             Ok(())
@@ -317,6 +334,29 @@ fn copy_executable(original: &Path, link: &Path) -> Result<()> {
 fn print_sysroot(user_settings: &UserSettings) -> Result<()> {
     let sysroot = user_settings.ensure_sysroot_location()?;
     println!("{}", sysroot.display());
+    Ok(())
+}
+
+fn print_path(user_settings: &UserSettings, wasix: bool, llvm: bool, binaryen: bool) -> Result<()> {
+    let mut paths = Vec::new();
+    if wasix {
+        paths.push(
+            user_settings
+                .bin_location
+                .clone()
+                .to_string_lossy()
+                .to_string(),
+        );
+    }
+    if llvm && let Some(bin_dir) = user_settings.llvm_location.get_bin_dir() {
+        paths.push(bin_dir.to_string_lossy().to_string());
+    }
+    if binaryen && let Some(bin_dir) = user_settings.binaryen_location.get_bin_dir() {
+        paths.push(bin_dir.to_string_lossy().to_string());
+    }
+    // Intentionally use `print!` (no trailing newline) so this raw PATH value can be
+    // consumed reliably by scripts and CI environments (e.g. piping to $GITHUB_PATH).
+    print!("{}", paths.join(":"));
     Ok(())
 }
 

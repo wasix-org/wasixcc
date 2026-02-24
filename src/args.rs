@@ -37,6 +37,21 @@ impl LlvmLocation {
             }
         }
     }
+    pub fn get_bin_dir(&self) -> Option<PathBuf> {
+        match self {
+            // Never override a user-provided path...
+            Self::UserProvided(path) => Some(path.join("bin")),
+
+            // ... but a default path with fallbacks is generally acceptable.
+            Self::DefaultPath(path) => {
+                if path.join("bin").exists() {
+                    Some(path.join("bin"))
+                } else {
+                    None
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -72,6 +87,21 @@ impl BinaryenLocation {
                         Use `wasixccenv download-binaryen` to download a compatible version."
                     );
                     PathBuf::from(tool)
+                }
+            }
+        }
+    }
+    pub fn get_bin_dir(&self) -> Option<PathBuf> {
+        match self {
+            // Never override a user-provided path...
+            Self::UserProvided(path) => Some(path.join("bin")),
+
+            // ... but a default path with fallbacks is generally acceptable.
+            Self::DefaultPath(path) => {
+                if path.join("bin").exists() {
+                    Some(path.join("bin"))
+                } else {
+                    None
                 }
             }
         }
