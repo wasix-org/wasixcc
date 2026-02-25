@@ -680,6 +680,26 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_compiler_args_stdin() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-x".to_string(),
+            "c".to_string(),
+            "-".to_string(),
+            "-o".to_string(),
+            "a.out".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        // `-` must be treated as a compiler input (stdin), not a flag
+        assert_eq!(pa.compiler_inputs, vec![PathBuf::from("-")]);
+        assert!(pa.linker_inputs.is_empty());
+        assert_eq!(pa.output, Some(PathBuf::from("a.out")));
+        // `-x c` should be forwarded as compiler args
+        assert_eq!(pa.compiler_args, vec!["-x".to_string(), "c".to_string()]);
+    }
+
+    #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_wl() {
         let mut us = UserSettings::default();
         us.discard_unsupported_flags = true;

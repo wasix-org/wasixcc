@@ -83,6 +83,11 @@ pub(super) fn lex_args<'a>(
                     flags.push(Flag::Terminator());
                     State::Terminated
                 }
+                "-" => {
+                    // A standalone `-` is a positional argument, and means read from stdin. Clang knows what to do with it.
+                    flags.push(Flag::Positional("-"));
+                    State::Normal
+                }
                 // Like -I foo with a separate argument
                 arg if flags_with_value.contains(arg) => {
                     // This is not perfect since some flags have an optional optional arg
