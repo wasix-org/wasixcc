@@ -300,6 +300,7 @@ mod tests {
             link_symbolic: true,
             generate_shell_script: false,
             shell_script_wasmer_args: vec![],
+            force_static_dependencies: false,
             discard_unsupported_flags: false,
             autoconf_workarounds: false,
             location: PathBuf::from("/home/user/.wasixcc"),

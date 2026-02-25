@@ -315,7 +315,7 @@ fn process_linker_flags<'a>(
     flags: impl IntoIterator<Item = Flag<'a>>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let mut linker_flags = Vec::new();
+    let mut linker_args = Vec::new();
     let mut inputs = Vec::new();
     let mut output = None;
 
@@ -328,10 +328,17 @@ fn process_linker_flags<'a>(
                 update_build_settings_from_linker_flag(&linker_flag, user_settings);
                 tracing::debug!("Discarding flag '{}'", &linker_flag);
             }
+            Flag::WithValue("-l", namespec, sep)
+                if user_settings.force_static_dependencies && !namespec.starts_with(':') =>
+            {
+                linker_args.extend(
+                    Flag::WithValue("-l", format!(":lib{namespec}.a").as_str(), sep).to_args(),
+                );
+            }
             Flag::WithValue("-o", value, _) => {
                 if user_settings.autoconf_workarounds && value == "conftest" {
                     user_settings.run_wasm_opt = Some(false);
-                    linker_flags.push(Flag::Simple("--no-shlib-sigcheck"));
+                    linker_args.extend(Flag::Simple("--no-shlib-sigcheck").to_args());
                 }
                 output = Some(PathBuf::from(value));
             }
@@ -339,19 +346,14 @@ fn process_linker_flags<'a>(
                 inputs.push(PathBuf::from(value));
             }
             Flag::Terminator() => {
-                linker_flags.push(linker_flag);
+                linker_args.extend(linker_flag.to_args());
             }
             Flag::Simple(_) | Flag::WithValue(_, _, _) => {
                 update_build_settings_from_linker_flag(&linker_flag, user_settings);
-                linker_flags.push(linker_flag);
+                linker_args.extend(linker_flag.to_args());
             }
         }
     }
-
-    let linker_args = linker_flags
-        .into_iter()
-        .flat_map(|flag| flag.to_args().into_iter())
-        .collect::<Vec<_>>();
 
     Ok(PreparedArgs {
         compiler_args: Vec::new(),
@@ -828,5 +830,88 @@ mod tests {
         assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
         assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
         assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
+    }
+
+    #[test]
+    fn test_prepare_linker_args_force_static_dependencies_attached() {
+        let mut us = UserSettings::default();
+        us.force_static_dependencies = true;
+        let args = vec![
+            "-lmylib".to_string(),
+            "-lz".to_string(),
+            "input.o".to_string(),
+        ];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+        assert_eq!(
+            pa.linker_args,
+            vec!["-l:libmylib.a".to_string(), "-l:libz.a".to_string()]
+        );
+        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
+    }
+
+    #[test]
+    fn test_prepare_linker_args_force_static_dependencies_space_separated() {
+        let mut us = UserSettings::default();
+        us.force_static_dependencies = true;
+        let args = vec!["-l".to_string(), "mylib".to_string(), "input.o".to_string()];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+        assert_eq!(
+            pa.linker_args,
+            vec!["-l".to_string(), ":libmylib.a".to_string()]
+        );
+        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
+    }
+
+    #[test]
+    fn test_prepare_linker_args_force_static_dependencies_preserves_literal() {
+        let mut us = UserSettings::default();
+        us.force_static_dependencies = true;
+        let args = vec![
+            "-l:libcustom.a".to_string(),
+            "-l".to_string(),
+            ":libother.so".to_string(),
+            "input.o".to_string(),
+        ];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+        // Already-literal -l: flags should not be double-wrapped
+        assert_eq!(
+            pa.linker_args,
+            vec![
+                "-l:libcustom.a".to_string(),
+                "-l".to_string(),
+                ":libother.so".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_prepare_linker_args_force_static_dependencies_off() {
+        let mut us = UserSettings::default();
+        assert!(!us.force_static_dependencies);
+        let args = vec!["-lmylib".to_string(), "input.o".to_string()];
+        let pa = prepare_linker_args(args, &mut us).unwrap();
+        assert_eq!(pa.linker_args, vec!["-lmylib".to_string()]);
+    }
+
+    #[test]
+    fn test_prepare_compiler_args_force_static_dependencies() {
+        let mut us = UserSettings::default();
+        us.force_static_dependencies = true;
+        let args = vec![
+            "-lmylib".to_string(),
+            "-l".to_string(),
+            "otherlib".to_string(),
+            "in.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+        assert_eq!(
+            pa.linker_args,
+            vec![
+                "-l:libmylib.a".to_string(),
+                "-l".to_string(),
+                ":libotherlib.a".to_string()
+            ]
+        );
+        assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
     }
 }

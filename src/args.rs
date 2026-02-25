@@ -173,6 +173,7 @@ pub struct UserSettings {
     pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
     pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
     pub shell_script_wasmer_args: Vec<String>,  // key name: SHELL_SCRIPT_WASMER_ARGS
+    pub force_static_dependencies: bool,        // key name: FORCE_STATIC_DEPENDENCIES
     pub discard_unsupported_flags: bool,        // key name: DISCARD_UNSUPPORTED_FLAGS
     pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
     pub location: PathBuf,                      // key name: LOCATION
@@ -432,6 +433,13 @@ pub fn gather_user_settings(
             None => vec![],
         };
 
+    let force_static_dependencies =
+        match try_get_user_setting_value("FORCE_STATIC_DEPENDENCIES", args, envs)? {
+            Some(value) => read_bool_user_setting(&value)
+                .with_context(|| format!("Invalid value {value} for FORCE_STATIC_DEPENDENCIES"))?,
+            None => false,
+        };
+
     let discard_unsupported_flags =
         match try_get_user_setting_value("DISCARD_UNSUPPORTED_FLAGS", args, envs)? {
             Some(value) => read_bool_user_setting(&value)
@@ -470,6 +478,7 @@ pub fn gather_user_settings(
         link_symbolic,
         generate_shell_script,
         shell_script_wasmer_args,
+        force_static_dependencies,
         discard_unsupported_flags,
         autoconf_workarounds,
         location,
