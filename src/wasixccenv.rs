@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use download::TagSpec;
 use std::path::{Path, PathBuf};
 
+mod cross_env;
 mod download;
 mod shell_env;
 
@@ -132,6 +133,36 @@ enum WasixccCommand {
         /// The home directory to look for shell rc files in. Defaults to the current user's home directory.
         home: Option<PathBuf>,
     },
+    /// Generate a sourceable POSIX shell script for cross-compilation environment
+    CrossEnv {
+        #[arg(long)]
+        /// Skip wasmer binfmt registration
+        no_binfmt: bool,
+        #[arg(long)]
+        /// Disable DISCARD_UNSUPPORTED_FLAGS and AUTOCONF_WORKAROUNDS
+        no_hacks: bool,
+        #[arg(long)]
+        /// Disable wasm exception handling
+        no_exceptions: bool,
+        #[arg(long)]
+        /// Disable position-independent code (PIC is on by default)
+        no_pic: bool,
+    },
+    /// Drop into an interactive shell with the cross-compilation environment already sourced
+    CrossShell {
+        #[arg(long)]
+        /// Skip wasmer binfmt registration
+        no_binfmt: bool,
+        #[arg(long)]
+        /// Disable DISCARD_UNSUPPORTED_FLAGS and AUTOCONF_WORKAROUNDS
+        no_hacks: bool,
+        #[arg(long)]
+        /// Disable wasm exception handling
+        no_exceptions: bool,
+        #[arg(long)]
+        /// Disable position-independent code (PIC is on by default)
+        no_pic: bool,
+    },
 }
 
 pub(crate) fn run() -> Result<()> {
@@ -241,6 +272,36 @@ source {env_nu_shell}  # For nushell"
                 .or_else(std::env::home_dir)
                 .context("Failed to get current user's home directory")?,
         ),
+        WasixccCommand::CrossEnv {
+            no_binfmt,
+            no_hacks,
+            no_exceptions,
+            no_pic,
+        } => {
+            let options = cross_env::CrossEnvOptions {
+                no_binfmt,
+                no_hacks,
+                no_exceptions,
+                no_pic,
+            };
+            let script = cross_env::generate_cross_env_script(&user_settings, &options);
+            println!("{script}");
+            Ok(())
+        }
+        WasixccCommand::CrossShell {
+            no_binfmt,
+            no_hacks,
+            no_exceptions,
+            no_pic,
+        } => {
+            let options = cross_env::CrossEnvOptions {
+                no_binfmt,
+                no_hacks,
+                no_exceptions,
+                no_pic,
+            };
+            cross_env::exec_cross_shell(&user_settings, &options)
+        }
     }
 }
 

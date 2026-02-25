@@ -21,6 +21,7 @@ path = "src/main.rs"
 anyhow = "1.0.98"
 regex = "1.11.1"
 tempfile = "3.20.0"
+exec = "0.3"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
