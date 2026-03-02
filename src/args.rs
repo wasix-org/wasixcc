@@ -69,7 +69,7 @@ impl LlvmLocation {
             bail!("Failed to get resource dir from clang");
         }
         let resource_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(PathBuf::from(resource_dir));
+        Ok(PathBuf::from(resource_dir))
     }
 }
 
