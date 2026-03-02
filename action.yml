@@ -62,6 +62,11 @@ inputs:
     required: false
     default: "false"
 
+  add-libtool-path:
+    description: "Whether to add libtool and libtoolize to PATH (true/false)"
+    required: false
+    default: "false"
+
   release-base-url:
     description: "Base url for wasixcc release tarballs (overrides version input)"
     required: false
@@ -219,7 +224,7 @@ runs:
         
         chmod +x "wasixccenv"
         ./wasixccenv aio-install --add-to-shell=false --sysroot-tag "${{ inputs.sysroot-tag }}" --llvm-tag "${{ inputs.llvm-tag }}" --binaryen-tag "${{ inputs.binaryen-tag }}" --libtool-tag "${{ inputs.libtool-tag }}"
-        ./wasixccenv print-path >> $GITHUB_PATH
+        ./wasixccenv print-path --binaryen="${{ inputs.add-binaryen-path }}" --llvm="${{ inputs.add-llvm-path }}" --libtool="${{ inputs.add-libtool-path }}" >> $GITHUB_PATH
         rm -rf "wasixccenv" # Got copied during aio-install, can be removed
 
     - name: Verify installation
