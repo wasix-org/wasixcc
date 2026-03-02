@@ -54,8 +54,17 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .into()
 });
 
-static CLANG_FLAGS_WITH_OPTIONAL_ARGS: LazyLock<HashSet<&str>> =
-    LazyLock::new(|| ["-ftls-model", "--target"].into());
+static CLANG_FLAGS_WITH_OPTIONAL_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "-ftls-model",
+        "--target",
+        "-fprofile-generate",
+        "-fcs-profile-generate",
+        "-fprofile-instr-generate",
+        "-fprofile-generate-cold-function-coverage",
+    ]
+    .into()
+});
 
 static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-L", "-l"].into());
@@ -84,6 +93,30 @@ static CLANG_KNOWN_COMPILER_INPUT_EXTENSIONS: LazyLock<HashSet<&str>> = LazyLock
         "ccm", "cpp", "CPP", "c++", "C++", "cui", "cxx", "CXX", "F03", "f03", "F08", "f08", "F90",
         "f90", "F95", "f95", "for", "FOR", "fpp", "FPP", "gch", "hip", "hipi", "hpp", "hxx", "iim",
         "iih", "mii", "ifs", "pch", "pcm", "c++m", "cppm", "cxxm", "hlsl",
+    ]
+    .into()
+});
+
+static CLANG_FLAGS_THAT_NEED_PROFILE_RT_AND_UNDEF: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "-fprofile-generate",
+        "-fcs-profile-generate",
+        "-fprofile-instr-generate",
+        "-fcreate-profile",
+        "-fprofile-generate-cold-function-coverage",
+    ]
+    .into()
+});
+static CLANG_FLAGS_THAT_NEED_PROFILE_RT: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "-fprofile-generate",
+        "-fcs-profile-generate",
+        "-fprofile-instr-generate",
+        "-fcreate-profile",
+        "-fprofile-generate-cold-function-coverage",
+        "-coverage",
+        "--coverage",
+        "-fprofile-arcs",
     ]
     .into()
 });
@@ -202,6 +235,19 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-pie") => {
             if user_settings.module_kind.is_none() {
                 user_settings.module_kind = Some(ModuleKind::DynamicMain);
+            }
+        }
+        Flag::Simple("-noprofilelib") => {
+            // Not entirely correct, as this should disable it even if a profile-generating flag present after it.
+            build_settings.needs_profile_rt_libs = false;
+        }
+        Flag::Simple(flag) | Flag::WithValue(flag, _, _)
+            if CLANG_FLAGS_THAT_NEED_PROFILE_RT.contains(flag) =>
+        {
+            // Some flags would cause clang to link
+            build_settings.needs_profile_rt_libs = true;
+            if CLANG_FLAGS_THAT_NEED_PROFILE_RT_AND_UNDEF.contains(flag) {
+                build_settings.undefine_llvm_profile_runtime = true;
             }
         }
         _ => {}
@@ -434,9 +480,7 @@ pub(super) fn prepare_compiler_args(
     run_cxx: bool,
 ) -> Result<(PreparedArgs, BuildSettings)> {
     let mut build_settings = BuildSettings {
-        opt_level: OptLevel::O0,
-        debug_level: DebugLevel::G0,
-        use_wasm_opt: true,
+        ..Default::default()
     };
 
     let args = add_extra_compiler_flags(args, user_settings, run_cxx);
@@ -498,9 +542,7 @@ mod tests {
     #[test]
     fn test_update_build_settings_from_arg() {
         let mut bs = BuildSettings {
-            opt_level: OptLevel::O0,
-            debug_level: DebugLevel::G0,
-            use_wasm_opt: true,
+            ..Default::default()
         };
         let mut us = UserSettings::default();
         update_build_settings_from_compiler_flag(Flag::Simple("-O3"), &mut bs, &mut us);

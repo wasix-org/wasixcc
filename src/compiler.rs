@@ -92,6 +92,20 @@ pub(crate) struct BuildSettings {
     opt_level: OptLevel,
     debug_level: DebugLevel,
     use_wasm_opt: bool,
+    needs_profile_rt_libs: bool,
+    undefine_llvm_profile_runtime: bool,
+}
+
+impl Default for BuildSettings {
+    fn default() -> Self {
+        Self {
+            opt_level: OptLevel::O0,
+            debug_level: DebugLevel::G0,
+            use_wasm_opt: true,
+            needs_profile_rt_libs: false,
+            undefine_llvm_profile_runtime: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -198,9 +212,8 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
     }
 
     let build_settings = BuildSettings {
-        opt_level: OptLevel::O0,
-        debug_level: DebugLevel::G0,
         use_wasm_opt: user_settings.run_wasm_opt.unwrap_or(true),
+        ..Default::default()
     };
 
     let state = State {
@@ -282,6 +295,8 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         .user_settings
         .llvm_location
         .get_tool_path(if state.cxx { "clang++" } else { "clang" });
+
+    let resource_dir = state.user_settings.llvm_location.get_resource_dir()?;
 
     let sysroot_path = state.user_settings.ensure_sysroot_location()?;
 
@@ -492,10 +507,10 @@ fn link_inputs(state: &State) -> Result<()> {
         .flat_map(|path| vec![path.clone(), path.join("wasm32-wasi")])
         .collect::<Vec<_>>();
     for linker_path in linker_paths {
-    let mut lib_arg = OsString::new();
-    lib_arg.push("-L");
+        let mut lib_arg = OsString::new();
+        lib_arg.push("-L");
         lib_arg.push(linker_path.as_os_str());
-    command.arg(lib_arg);
+        command.arg(lib_arg);
     }
 
     if module_kind.is_executable() {
@@ -525,6 +540,13 @@ fn link_inputs(state: &State) -> Result<()> {
 
     // Link as much as needed out of libclang_rt.builtins regardless of module kind.
     command.arg("-lclang_rt.builtins-wasm32");
+
+    if state.build_settings.needs_profile_rt_libs {
+        command.arg("-lclang_rt.profile-wasm32");
+    }
+    if state.build_settings.undefine_llvm_profile_runtime {
+        command.arg("-u__llvm_profile_runtime");
+    }
 
     if state.user_settings.module_kind().requires_pic() {
         command.args([
@@ -825,9 +847,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -853,9 +873,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -881,9 +899,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -910,9 +926,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -938,9 +952,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -967,9 +979,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -996,9 +1006,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1028,9 +1036,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1090,9 +1096,7 @@ mod tests {
         let state = State {
             user_settings: us,
             build_settings: BuildSettings {
-                opt_level: OptLevel::O0,
-                debug_level: DebugLevel::G0,
-                use_wasm_opt: true,
+                ..Default::default()
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
