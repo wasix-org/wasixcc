@@ -1,4 +1,4 @@
-use crate::args::UserSettings;
+use crate::args::{LlvmLocation, UserSettings};
 
 /// Options controlling which sections appear in the generated cross-env script.
 pub struct CrossEnvOptions {
@@ -44,6 +44,9 @@ pub fn generate_cross_env_script(
 
     // Export wasixcc configuration
     add_wasixcc_settings(&mut script, options);
+
+    // Export sysroot locations
+    add_sysroot_exports(&mut script, user_settings, options);
 
     // Export libtool variables if libtool is present
     if user_settings.libtool_location.get_bin_dir().is_some() {
@@ -93,30 +96,59 @@ pub fn exec_cross_shell(
 fn add_location_variables(script: &mut String, user_settings: &UserSettings) {
     script.push_str("# Define toolchain locations\n");
     script.push_str(&format!(
-        "WASIXCC_LOCATION=\"{}\"\n",
+        "export WASIXCC_LOCATION='{}'\n",
         user_settings.location.display()
     ));
     script.push_str(&format!(
-        "WASIXCC_BIN_DIR=\"{}\"\n",
+        "export WASIXCC_BIN_LOCATION='{}'\n",
         user_settings.bin_location.display()
     ));
 
-    if let Some(llvm_bin) = user_settings.llvm_location.get_bin_dir() {
-        script.push_str(&format!("WASIXCC_LLVM_DIR=\"{}\"\n", llvm_bin.display()));
+    match &user_settings.llvm_location {
+        LlvmLocation::UserProvided(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_LLVM_LOCATION='{}'\n",
+                path.display()
+            ));
+        }
+        LlvmLocation::DefaultPath(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_LLVM_LOCATION='{}'\n",
+                path.display()
+            ));
+
+            // Don't define the variable if LLVM is not present, to avoid confusion
+        }
     }
 
-    if let Some(binaryen_bin) = user_settings.binaryen_location.get_bin_dir() {
-        script.push_str(&format!(
-            "WASIXCC_BINARYEN_DIR=\"{}\"\n",
-            binaryen_bin.display()
-        ));
+    match &user_settings.binaryen_location {
+        crate::args::BinaryenLocation::UserProvided(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_BINARYEN_LOCATION='{}'\n",
+                path.display()
+            ));
+        }
+        crate::args::BinaryenLocation::DefaultPath(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_BINARYEN_LOCATION='{}'\n",
+                path.display()
+            ));
+        }
     }
 
-    if let Some(libtool_bin) = user_settings.libtool_location.get_bin_dir() {
-        script.push_str(&format!(
-            "WASIXCC_LIBTOOL_DIR=\"{}\"\n",
-            libtool_bin.display()
-        ));
+    match &user_settings.libtool_location {
+        crate::args::LibtoolLocation::UserProvided(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_LIBTOOL_LOCATION='{}'\n",
+                path.display()
+            ));
+        }
+        crate::args::LibtoolLocation::DefaultPath(path) => {
+            script.push_str(&format!(
+                "export WASIXCC_LIBTOOL_LOCATION='{}'\n",
+                path.display()
+            ));
+        }
     }
 
     script.push('\n');
@@ -125,18 +157,22 @@ fn add_location_variables(script: &mut String, user_settings: &UserSettings) {
 fn add_directory_checks(script: &mut String, user_settings: &UserSettings) {
     script.push_str("# Check for required directories\n");
 
-    add_dir_check(script, "$WASIXCC_BIN_DIR", "wasixcc bin directory");
+    add_dir_check(script, "$WASIXCC_BIN_LOCATION", "wasixcc bin directory");
 
     if user_settings.llvm_location.get_bin_dir().is_some() {
-        add_dir_check(script, "$WASIXCC_LLVM_DIR", "LLVM bin directory");
+        add_dir_check(script, "$WASIXCC_LLVM_LOCATION", "LLVM bin directory");
     }
 
     if user_settings.binaryen_location.get_bin_dir().is_some() {
-        add_dir_check(script, "$WASIXCC_BINARYEN_DIR", "binaryen bin directory");
+        add_dir_check(
+            script,
+            "$WASIXCC_BINARYEN_LOCATION",
+            "binaryen bin directory",
+        );
     }
 
     if user_settings.libtool_location.get_bin_dir().is_some() {
-        add_dir_check(script, "$WASIXCC_LIBTOOL_DIR", "libtool bin directory");
+        add_dir_check(script, "$WASIXCC_LIBTOOL_LOCATION", "libtool bin directory");
     }
 
     script.push('\n');
@@ -154,18 +190,18 @@ fn add_dir_check(script: &mut String, var_ref: &str, name: &str) {
 fn add_path_export(script: &mut String, user_settings: &UserSettings) {
     script.push_str("# Export PATH with all toolchain directories\n");
 
-    let mut path_components = vec!["$WASIXCC_BIN_DIR".to_string()];
+    let mut path_components = vec!["$WASIXCC_BIN_LOCATION".to_string()];
 
     if user_settings.llvm_location.get_bin_dir().is_some() {
-        path_components.push("$WASIXCC_LLVM_DIR".to_string());
+        path_components.push("$WASIXCC_LLVM_LOCATION".to_string());
     }
 
     if user_settings.binaryen_location.get_bin_dir().is_some() {
-        path_components.push("$WASIXCC_BINARYEN_DIR".to_string());
+        path_components.push("$WASIXCC_BINARYEN_LOCATION".to_string());
     }
 
     if user_settings.libtool_location.get_bin_dir().is_some() {
-        path_components.push("$WASIXCC_LIBTOOL_DIR".to_string());
+        path_components.push("$WASIXCC_LIBTOOL_LOCATION".to_string());
     }
 
     let path_string = path_components.join(":");
@@ -212,19 +248,81 @@ fn add_libtool_exports(script: &mut String, user_settings: &UserSettings) {
 fn add_wasixcc_settings(script: &mut String, options: &CrossEnvOptions) {
     script.push_str("# Export wasixcc configuration\n");
 
-    if !options.no_hacks {
-        script.push_str("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=yes\n");
-        script.push_str("export WASIXCC_AUTOCONF_WORKAROUNDS=yes\n");
+    // Cross-env flags unconditionally overwrite any pre-existing env var value.
+    // When a flag is absent the default cross-env value is applied only if the
+    // variable is not already set in the environment (POSIX `:=` assignment).
+    if options.no_hacks {
+        script.push_str("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=no\n");
+        script.push_str("export WASIXCC_AUTOCONF_WORKAROUNDS=no\n");
+    } else {
+        script.push_str(": \"${WASIXCC_DISCARD_UNSUPPORTED_FLAGS:=yes}\"\n");
+        script.push_str("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS\n");
+        script.push_str(": \"${WASIXCC_AUTOCONF_WORKAROUNDS:=yes}\"\n");
+        script.push_str("export WASIXCC_AUTOCONF_WORKAROUNDS\n");
     }
 
     if options.no_exceptions {
         script.push_str("export WASIXCC_WASM_EXCEPTIONS=no\n");
+    } else {
+        script.push_str(": \"${WASIXCC_WASM_EXCEPTIONS:=yes}\"\n");
+        script.push_str("export WASIXCC_WASM_EXCEPTIONS\n");
     }
 
-    if !options.no_pic {
-        script.push_str("export WASIXCC_PIC=yes\n");
-        script.push_str("export WASIXCC_INCLUDE_CPP_SYMBOLS=yes\n");
+    if options.no_pic {
+        script.push_str("export WASIXCC_PIC=no\n");
+        script.push_str("export WASIXCC_INCLUDE_CPP_SYMBOLS=no\n");
+    } else {
+        script.push_str(": \"${WASIXCC_PIC:=yes}\"\n");
+        script.push_str("export WASIXCC_PIC\n");
+        script.push_str(": \"${WASIXCC_INCLUDE_CPP_SYMBOLS:=yes}\"\n");
+        script.push_str("export WASIXCC_INCLUDE_CPP_SYMBOLS\n");
     }
+
+    script.push('\n');
+}
+
+fn add_sysroot_exports(
+    script: &mut String,
+    user_settings: &UserSettings,
+    options: &CrossEnvOptions,
+) {
+    use crate::compiler::WasmExceptionStyle;
+
+    script.push_str("# Export sysroot locations\n");
+    script.push_str(&format!(
+        "export WASIXCC_SYSROOT_PREFIX=\"{}\"\n",
+        user_settings.sysroot_prefix.display()
+    ));
+
+    // Compute the concrete sysroot path, reflecting the EH/PIC options that
+    // are being written into the script (mirrors UserSettings::sysroot_location).
+    let effective_sysroot = if let Some(explicit) = &user_settings.sysroot_location {
+        explicit.clone()
+    } else {
+        let wasm_exceptions = if options.no_exceptions {
+            WasmExceptionStyle::Off
+        } else {
+            user_settings.wasm_exceptions
+        };
+        let pic = !options.no_pic;
+        match (wasm_exceptions, pic) {
+            (WasmExceptionStyle::Legacy, true) => {
+                user_settings.sysroot_prefix.join("sysroot-ehpic")
+            }
+            (WasmExceptionStyle::Legacy, false) => user_settings.sysroot_prefix.join("sysroot-eh"),
+            (WasmExceptionStyle::Exnref, true) => {
+                user_settings.sysroot_prefix.join("sysroot-exnref-ehpic")
+            }
+            (WasmExceptionStyle::Exnref, false) => {
+                user_settings.sysroot_prefix.join("sysroot-exnref-eh")
+            }
+            (WasmExceptionStyle::Off, _) => user_settings.sysroot_prefix.join("sysroot"),
+        }
+    };
+    script.push_str(&format!(
+        "export WASIXCC_SYSROOT=\"{}\"\n",
+        effective_sysroot.display()
+    ));
 
     script.push('\n');
 }
@@ -318,21 +416,26 @@ mod tests {
         assert!(script.starts_with("#!/bin/sh\n"));
 
         // Check location variable definitions
-        assert!(script.contains("WASIXCC_LOCATION=\"/home/user/.wasixcc\""));
-        assert!(script.contains("WASIXCC_BIN_DIR=\"/home/user/.wasixcc/bin\""));
-        assert!(script.contains("WASIXCC_LLVM_DIR=\"/home/user/.wasixcc/llvm/bin\""));
-        assert!(script.contains("WASIXCC_BINARYEN_DIR=\"/home/user/.wasixcc/binaryen/bin\""));
-        assert!(script.contains("WASIXCC_LIBTOOL_DIR=\"/home/user/.wasixcc/libtool/bin\""));
+        assert!(script.contains("export WASIXCC_LOCATION=\"/home/user/.wasixcc\""));
+        assert!(script.contains("export WASIXCC_BIN_LOCATION=\"/home/user/.wasixcc/bin\""));
+        assert!(script.contains("export WASIXCC_LLVM_LOCATION=\"/home/user/.wasixcc/llvm/bin\""));
+        assert!(
+            script
+                .contains("export WASIXCC_BINARYEN_LOCATION=\"/home/user/.wasixcc/binaryen/bin\"")
+        );
+        assert!(
+            script.contains("export WASIXCC_LIBTOOL_LOCATION=\"/home/user/.wasixcc/libtool/bin\"")
+        );
 
         // Check directory checks reference variables
-        assert!(script.contains("test -d \"$WASIXCC_BIN_DIR\""));
-        assert!(script.contains("test -d \"$WASIXCC_LLVM_DIR\""));
-        assert!(script.contains("test -d \"$WASIXCC_BINARYEN_DIR\""));
-        assert!(script.contains("test -d \"$WASIXCC_LIBTOOL_DIR\""));
+        assert!(script.contains("test -d \"$WASIXCC_BIN_LOCATION\""));
+        assert!(script.contains("test -d \"$WASIXCC_LLVM_LOCATION\""));
+        assert!(script.contains("test -d \"$WASIXCC_BINARYEN_LOCATION\""));
+        assert!(script.contains("test -d \"$WASIXCC_LIBTOOL_LOCATION\""));
         assert!(script.contains("return 1"));
 
         // Check PATH export uses variables
-        assert!(script.contains("export PATH=\"$WASIXCC_BIN_DIR:$WASIXCC_LLVM_DIR:$WASIXCC_BINARYEN_DIR:$WASIXCC_LIBTOOL_DIR:$PATH\""));
+        assert!(script.contains("export PATH=\"$WASIXCC_BIN_LOCATION:$WASIXCC_LLVM_LOCATION:$WASIXCC_BINARYEN_LOCATION:$WASIXCC_LIBTOOL_LOCATION:$PATH\""));
 
         // Check toolchain exports
         assert!(script.contains("export CC=wasixcc"));
@@ -344,13 +447,19 @@ mod tests {
         assert!(script.contains("export AS=llvm-as"));
         assert!(script.contains("export STRIP=llvm-strip"));
 
-        // Check wasixcc settings (defaults: hacks on, pic on)
-        assert!(script.contains("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=yes"));
-        assert!(script.contains("export WASIXCC_AUTOCONF_WORKAROUNDS=yes"));
-        assert!(script.contains("export WASIXCC_PIC=yes"));
-        assert!(script.contains("export WASIXCC_INCLUDE_CPP_SYMBOLS=yes"));
-        // Exceptions are on by default (no export needed)
-        assert!(!script.contains("WASIXCC_WASM_EXCEPTIONS"));
+        // Check wasixcc settings (defaults: hacks on, exceptions on, pic on)
+        // Variables are set via POSIX conditional assignment (:=) so user env vars take precedence
+        assert!(script.contains(": \"${WASIXCC_DISCARD_UNSUPPORTED_FLAGS:=yes}\""));
+        assert!(script.contains(": \"${WASIXCC_AUTOCONF_WORKAROUNDS:=yes}\""));
+        assert!(script.contains(": \"${WASIXCC_PIC:=yes}\""));
+        assert!(script.contains(": \"${WASIXCC_INCLUDE_CPP_SYMBOLS:=yes}\""));
+        assert!(script.contains(": \"${WASIXCC_WASM_EXCEPTIONS:=yes}\""));
+        // All variables are exported after conditional assignment
+        assert!(script.contains("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS"));
+        assert!(script.contains("export WASIXCC_AUTOCONF_WORKAROUNDS"));
+        assert!(script.contains("export WASIXCC_PIC"));
+        assert!(script.contains("export WASIXCC_INCLUDE_CPP_SYMBOLS"));
+        assert!(script.contains("export WASIXCC_WASM_EXCEPTIONS"));
 
         // Check libtool exports use resolved paths (POSIX compliant)
         assert!(script.contains("export ACLOCAL_PATH=\"/home/user/.wasixcc/libtool/share/aclocal"));
@@ -391,10 +500,10 @@ mod tests {
         };
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(!script.contains("WASIXCC_DISCARD_UNSUPPORTED_FLAGS"));
-        assert!(!script.contains("WASIXCC_AUTOCONF_WORKAROUNDS"));
-        // PIC should still be present
-        assert!(script.contains("export WASIXCC_PIC=yes"));
+        assert!(script.contains("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=no"));
+        assert!(script.contains("export WASIXCC_AUTOCONF_WORKAROUNDS=no"));
+        // PIC should still use conditional assignment
+        assert!(script.contains(": \"${WASIXCC_PIC:=yes}\""));
     }
 
     #[test]
@@ -418,8 +527,50 @@ mod tests {
         };
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(!script.contains("WASIXCC_PIC"));
-        assert!(!script.contains("WASIXCC_INCLUDE_CPP_SYMBOLS"));
+        assert!(script.contains("export WASIXCC_PIC=no"));
+        assert!(script.contains("export WASIXCC_INCLUDE_CPP_SYMBOLS=no"));
+        // Must not also emit the conditional-assignment variants
+        assert!(!script.contains("${WASIXCC_PIC"));
+        assert!(!script.contains("${WASIXCC_INCLUDE_CPP_SYMBOLS"));
+    }
+
+    #[test]
+    fn test_sysroot_exports_default() {
+        // Default settings: Exnref EH, no PIC → sysroot-exnref-eh
+        let settings = make_test_settings();
+        let options = default_options();
+        let script = generate_cross_env_script(&settings, &options);
+
+        assert!(script.contains("export WASIXCC_SYSROOT_PREFIX=\"/home/user/.wasixcc/sysroot\""));
+        assert!(
+            script.contains(
+                "export WASIXCC_SYSROOT=\"/home/user/.wasixcc/sysroot/sysroot-exnref-eh\""
+            )
+        );
+    }
+
+    #[test]
+    fn test_sysroot_exports_no_exceptions() {
+        // no_exceptions → WasmExceptionStyle::Off, no PIC → plain sysroot
+        let settings = make_test_settings();
+        let options = CrossEnvOptions {
+            no_exceptions: true,
+            ..default_options()
+        };
+        let script = generate_cross_env_script(&settings, &options);
+
+        assert!(script.contains("export WASIXCC_SYSROOT=\"/home/user/.wasixcc/sysroot/sysroot\""));
+    }
+
+    #[test]
+    fn test_sysroot_exports_explicit_sysroot_location() {
+        // When sysroot_location is set explicitly it should be forwarded as-is
+        let mut settings = make_test_settings();
+        settings.sysroot_location = Some(PathBuf::from("/custom/sysroot"));
+        let options = default_options();
+        let script = generate_cross_env_script(&settings, &options);
+
+        assert!(script.contains("export WASIXCC_SYSROOT=\"/custom/sysroot\""));
     }
 
     #[test]
@@ -433,10 +584,10 @@ mod tests {
         };
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(!script.contains("WASIXCC_DISCARD_UNSUPPORTED_FLAGS"));
-        assert!(!script.contains("WASIXCC_AUTOCONF_WORKAROUNDS"));
-        assert!(!script.contains("WASIXCC_PIC"));
-        assert!(!script.contains("WASIXCC_INCLUDE_CPP_SYMBOLS"));
+        assert!(script.contains("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=no"));
+        assert!(script.contains("export WASIXCC_AUTOCONF_WORKAROUNDS=no"));
+        assert!(script.contains("export WASIXCC_PIC=no"));
+        assert!(script.contains("export WASIXCC_INCLUDE_CPP_SYMBOLS=no"));
         assert!(script.contains("export WASIXCC_WASM_EXCEPTIONS=no"));
         assert!(!script.contains("WASMER_BIN"));
         assert!(!script.contains("binfmt"));
@@ -450,10 +601,12 @@ mod tests {
         let options = default_options();
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(script.contains("wasixcc bin directory does not exist: $WASIXCC_BIN_DIR"));
-        assert!(script.contains("LLVM bin directory does not exist: $WASIXCC_LLVM_DIR"));
-        assert!(script.contains("binaryen bin directory does not exist: $WASIXCC_BINARYEN_DIR"));
-        assert!(script.contains("libtool bin directory does not exist: $WASIXCC_LIBTOOL_DIR"));
+        assert!(script.contains("wasixcc bin directory does not exist: $WASIXCC_BIN_LOCATION"));
+        assert!(script.contains("LLVM bin directory does not exist: $WASIXCC_LLVM_LOCATION"));
+        assert!(
+            script.contains("binaryen bin directory does not exist: $WASIXCC_BINARYEN_LOCATION")
+        );
+        assert!(script.contains("libtool bin directory does not exist: $WASIXCC_LIBTOOL_LOCATION"));
     }
 
     #[test]
@@ -479,16 +632,16 @@ mod tests {
         let options = default_options();
         let script = generate_cross_env_script(&settings, &options);
 
-        // Should still define WASIXCC_BIN_DIR
-        assert!(script.contains("WASIXCC_BIN_DIR=\"/home/user/.wasixcc/bin\""));
+        // Should still define WASIXCC_BIN_LOCATION
+        assert!(script.contains("export WASIXCC_BIN_LOCATION=\"/home/user/.wasixcc/bin\""));
         // Should not define optional location variables
-        assert!(!script.contains("WASIXCC_LLVM_DIR"));
-        assert!(!script.contains("WASIXCC_BINARYEN_DIR"));
-        assert!(!script.contains("WASIXCC_LIBTOOL_DIR"));
+        assert!(!script.contains("WASIXCC_LLVM_LOCATION"));
+        assert!(!script.contains("WASIXCC_BINARYEN_LOCATION"));
+        assert!(!script.contains("WASIXCC_LIBTOOL_LOCATION"));
         // Should not reference /nonexistent
         assert!(!script.contains("/nonexistent"));
         // PATH should only include bin dir
-        assert!(script.contains("export PATH=\"$WASIXCC_BIN_DIR:$PATH\""));
+        assert!(script.contains("export PATH=\"$WASIXCC_BIN_LOCATION:$PATH\""));
         assert!(script.contains("export CC=wasixcc"));
     }
 
@@ -504,10 +657,10 @@ mod tests {
             .expect("PATH export should exist");
 
         // Verify order: bin, llvm, binaryen, libtool
-        let bin_pos = path_line.find("$WASIXCC_BIN_DIR").unwrap();
-        let llvm_pos = path_line.find("$WASIXCC_LLVM_DIR").unwrap();
-        let binaryen_pos = path_line.find("$WASIXCC_BINARYEN_DIR").unwrap();
-        let libtool_pos = path_line.find("$WASIXCC_LIBTOOL_DIR").unwrap();
+        let bin_pos = path_line.find("$WASIXCC_BIN_LOCATION").unwrap();
+        let llvm_pos = path_line.find("$WASIXCC_LLVM_LOCATION").unwrap();
+        let binaryen_pos = path_line.find("$WASIXCC_BINARYEN_LOCATION").unwrap();
+        let libtool_pos = path_line.find("$WASIXCC_LIBTOOL_LOCATION").unwrap();
 
         assert!(bin_pos < llvm_pos);
         assert!(llvm_pos < binaryen_pos);
@@ -581,11 +734,16 @@ mod tests {
         assert!(!script.contains("#!/usr/bin/env bash"));
         assert!(!script.contains("#!/bin/bash"));
 
-        // Must not use bash-only features
-        assert!(
-            !script.contains("${"),
-            "No bash parameter expansion allowed"
-        );
+        // Must not use bash-only parameter expansion; ${VAR:=default} is allowed (POSIX)
+        for line in script.lines() {
+            if let Some(rest) = line.find("${").map(|i| &line[i + 2..]) {
+                assert!(
+                    rest.contains(":="),
+                    "Bash-only parameter expansion found: {line}"
+                );
+            }
+        }
+
         assert!(
             !script.contains("which "),
             "Use 'command -v' instead of 'which'"

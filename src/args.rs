@@ -54,13 +54,6 @@ impl LlvmLocation {
     }
 }
 
-#[cfg(test)]
-impl Default for LlvmLocation {
-    fn default() -> Self {
-        LlvmLocation::DefaultPath(PathBuf::new())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryenLocation {
     UserProvided(PathBuf),
@@ -105,13 +98,6 @@ impl BinaryenLocation {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-impl Default for BinaryenLocation {
-    fn default() -> Self {
-        BinaryenLocation::DefaultPath(PathBuf::new())
     }
 }
 
