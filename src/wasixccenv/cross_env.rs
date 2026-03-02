@@ -456,6 +456,7 @@ mod tests {
         assert!(script.contains("export RANLIB=wasixranlib"));
         assert!(script.contains("export AS=llvm-as"));
         assert!(script.contains("export STRIP=llvm-strip"));
+        assert!(script.contains("export INSTALL=\"/usr/bin/install --strip-program llvm-strip\""));
 
         // Check wasixcc settings (defaults: hacks on, exceptions on, pic on)
         // Variables are set via POSIX conditional assignment (:=) so user env vars take precedence
