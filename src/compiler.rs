@@ -407,6 +407,8 @@ fn link_inputs(state: &State) -> Result<()> {
         "--import-memory",
         "--export-dynamic",
         "--export=__wasm_call_ctors",
+        // Do not demangle the function names (happens by default)
+        "--no-demangle",
     ]);
 
     if state.user_settings.wasm_exceptions.is_enabled() {
