@@ -254,11 +254,15 @@ fn add_wasixcc_settings(script: &mut String, options: &CrossEnvOptions) {
     if options.no_hacks {
         script.push_str("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS=no\n");
         script.push_str("export WASIXCC_AUTOCONF_WORKAROUNDS=no\n");
+        script.push_str("export WASIXCC_INCLUDE_USR_DIRS=no\n");
     } else {
         script.push_str(": \"${WASIXCC_DISCARD_UNSUPPORTED_FLAGS:=yes}\"\n");
         script.push_str("export WASIXCC_DISCARD_UNSUPPORTED_FLAGS\n");
         script.push_str(": \"${WASIXCC_AUTOCONF_WORKAROUNDS:=yes}\"\n");
         script.push_str("export WASIXCC_AUTOCONF_WORKAROUNDS\n");
+        // Not a hack, but added anyway to avoid adding more --no-* flags
+        script.push_str(": \"${WASIXCC_INCLUDE_USR_DIRS:=yes}\"\n");
+        script.push_str("export WASIXCC_INCLUDE_USR_DIRS\n");
     }
 
     if options.no_exceptions {
@@ -403,6 +407,7 @@ mod tests {
             autoconf_workarounds: false,
             location: PathBuf::from("/home/user/.wasixcc"),
             bin_location: PathBuf::from("/home/user/.wasixcc/bin"),
+            include_usr_dirs: false,
         }
     }
 

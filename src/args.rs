@@ -52,6 +52,25 @@ impl LlvmLocation {
             }
         }
     }
+    pub fn get_resource_dir(&self) -> Result<PathBuf> {
+        let clang_executable = self.get_tool_path("clang");
+        if !clang_executable.exists() {
+            bail!(
+                "Clang executable not found at expected path: {}. Cannot determine resource dir.",
+                clang_executable.display()
+            );
+        }
+        // Try to find the resource dir by running `clang --print-resource-dir`
+        let output = std::process::Command::new(clang_executable)
+            .arg("-print-resource-dir")
+            .output()?;
+
+        if !output.status.success() {
+            bail!("Failed to get resource dir from clang");
+        }
+        let resource_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(PathBuf::from(resource_dir));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,6 +183,7 @@ pub struct UserSettings {
     pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
     pub location: PathBuf,                      // key name: LOCATION
     pub bin_location: PathBuf,                  // key name: BIN_LOCATION
+    pub include_usr_dirs: bool,                 // key name: INCLUDE_USR_DIRS
 }
 
 #[cfg(test)]
@@ -440,6 +460,12 @@ pub fn gather_user_settings(
         None => false,
     };
 
+    let include_usr_dirs = match try_get_user_setting_value("INCLUDE_USR_DIRS", args, envs)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for INCLUDE_USR_DIRS"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -469,6 +495,7 @@ pub fn gather_user_settings(
         autoconf_workarounds,
         location,
         bin_location,
+        include_usr_dirs,
     })
 }
 

@@ -302,6 +302,40 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         OsStr::new("-D_WASI_EMULATED_PROCESS_CLOCKS"),
     ];
 
+    // The order of the paths is important and deliberate to mirror the default search order of clang
+    let include_paths = if state.user_settings.include_usr_dirs {
+        vec![
+            PathBuf::from("/usr/local/include"),
+            PathBuf::from("/include"),
+            PathBuf::from("/usr/include"),
+        ]
+    } else {
+        vec![PathBuf::from("/include")]
+    };
+    let cxx_include_paths = if state.cxx {
+        include_paths
+            .iter()
+            .map(|p| p.join("c++/v1").to_path_buf())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    // Add cxx include paths
+    for include_path in &cxx_include_paths {
+        command_args.push(OsStr::new("-iwithsysroot"));
+        command_args.push(include_path.as_os_str());
+    }
+    // Add resource include path
+    command_args.push(OsStr::new("-isystem"));
+    let resource_include_dir = resource_dir.join("include");
+    command_args.push(resource_include_dir.as_os_str());
+    // Add regular include paths
+    for include_path in &include_paths {
+        command_args.push(OsStr::new("-iwithsysroot"));
+        command_args.push(include_path.as_os_str());
+    }
+
     if state.user_settings.wasm_exceptions.is_enabled() {
         command_args.push(OsStr::new("-fwasm-exceptions"));
 
@@ -446,17 +480,23 @@ fn link_inputs(state: &State) -> Result<()> {
         command.args(["--whole-archive", "--export-all"]);
     }
 
-    // Make sysroots libs available to all modules so they can optionally
-    // link against them if needed, even when we don't.
+    // Add linker paths
+    // The order of the paths is important and deliberate to mirror the default search order of clang
+    let mut linker_paths = vec![sysroot_path.join("lib")];
+    if state.user_settings.include_usr_dirs {
+        linker_paths.push(sysroot_path.join("usr/lib"));
+        linker_paths.push(sysroot_path.join("usr/local/lib"));
+    }
+    let linker_paths = linker_paths
+        .into_iter()
+        .flat_map(|path| vec![path.clone(), path.join("wasm32-wasi")])
+        .collect::<Vec<_>>();
+    for linker_path in linker_paths {
     let mut lib_arg = OsString::new();
     lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_path);
+        lib_arg.push(linker_path.as_os_str());
     command.arg(lib_arg);
-
-    let mut lib_arg = OsString::new();
-    lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_wasm32_path);
-    command.arg(lib_arg);
+    }
 
     if module_kind.is_executable() {
         command.args([
