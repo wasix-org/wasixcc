@@ -50,6 +50,7 @@ static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-Xlinker",
         "-Xclang",
         "-z",
+        "--prefix",
     ]
     .into()
 });
@@ -81,6 +82,7 @@ static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "-fwasm-exceptions",
         "--no-wasm-opt",
         "--wasm-opt",
+        "--prefix",
     ]
     .into()
 });
