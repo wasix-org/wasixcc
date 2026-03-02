@@ -218,6 +218,7 @@ fn add_toolchain_exports(script: &mut String) {
     script.push_str("export RANLIB=wasixranlib\n");
     script.push_str("export AS=llvm-as\n");
     script.push_str("export STRIP=llvm-strip\n");
+    script.push_str("export INSTALL=\"/usr/bin/install --strip-program=llvm-strip\"\n");
     script.push('\n');
 }
 
@@ -456,7 +457,7 @@ mod tests {
         assert!(script.contains("export RANLIB=wasixranlib"));
         assert!(script.contains("export AS=llvm-as"));
         assert!(script.contains("export STRIP=llvm-strip"));
-        assert!(script.contains("export INSTALL=\"/usr/bin/install --strip-program llvm-strip\""));
+        assert!(script.contains("export INSTALL=\"/usr/bin/install --strip-program=llvm-strip\""));
 
         // Check wasixcc settings (defaults: hacks on, exceptions on, pic on)
         // Variables are set via POSIX conditional assignment (:=) so user env vars take precedence
