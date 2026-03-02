@@ -110,6 +110,10 @@ static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "--thinlto-cache-policy",
         "--thinlto-cache-dir",
         "--soname",
+        // TODO: This is not the only flag that is also allowed with one dash.
+        // We need to review all flags and verify for which two dashes are ok
+        // --help page is not a reliable source for this, this need testing.
+        "-soname",
         "--rsp-quoting",
         "--reproduce",
         "--Map",
