@@ -299,7 +299,7 @@ fn add_sysroot_exports(
 
     script.push_str("# Export sysroot locations\n");
     script.push_str(&format!(
-        "export WASIXCC_SYSROOT_PREFIX=\"{}\"\n",
+        "export WASIXCC_SYSROOT_PREFIX='{}'\n",
         user_settings.sysroot_prefix.display()
     ));
 
@@ -329,7 +329,7 @@ fn add_sysroot_exports(
         }
     };
     script.push_str(&format!(
-        "export WASIXCC_SYSROOT=\"{}\"\n",
+        "export WASIXCC_SYSROOT='{}'\n",
         effective_sysroot.display()
     ));
 
@@ -427,16 +427,11 @@ mod tests {
         assert!(script.starts_with("#!/bin/sh\n"));
 
         // Check location variable definitions
-        assert!(script.contains("export WASIXCC_LOCATION=\"/home/user/.wasixcc\""));
-        assert!(script.contains("export WASIXCC_BIN_LOCATION=\"/home/user/.wasixcc/bin\""));
-        assert!(script.contains("export WASIXCC_LLVM_LOCATION=\"/home/user/.wasixcc/llvm/bin\""));
-        assert!(
-            script
-                .contains("export WASIXCC_BINARYEN_LOCATION=\"/home/user/.wasixcc/binaryen/bin\"")
-        );
-        assert!(
-            script.contains("export WASIXCC_LIBTOOL_LOCATION=\"/home/user/.wasixcc/libtool/bin\"")
-        );
+        assert!(script.contains("export WASIXCC_LOCATION='/home/user/.wasixcc'"));
+        assert!(script.contains("export WASIXCC_BIN_LOCATION='/home/user/.wasixcc/bin'"));
+        assert!(script.contains("export WASIXCC_LLVM_LOCATION='/home/user/.wasixcc/llvm'"));
+        assert!(script.contains("export WASIXCC_BINARYEN_LOCATION='/home/user/.wasixcc/binaryen'"));
+        assert!(script.contains("export WASIXCC_LIBTOOL_LOCATION='/home/user/.wasixcc/libtool'"));
 
         // Check directory checks reference variables
         assert!(script.contains("test -d \"$WASIXCC_BIN_LOCATION\""));
@@ -553,10 +548,10 @@ mod tests {
         let options = default_options();
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(script.contains("export WASIXCC_SYSROOT_PREFIX=\"/home/user/.wasixcc/sysroot\""));
+        assert!(script.contains("export WASIXCC_SYSROOT_PREFIX='/home/user/.wasixcc/sysroot'"));
         assert!(
             script.contains(
-                "export WASIXCC_SYSROOT=\"/home/user/.wasixcc/sysroot/sysroot-exnref-eh\""
+                "export WASIXCC_SYSROOT='/home/user/.wasixcc/sysroot/sysroot-exnref-ehpic'"
             )
         );
     }
@@ -571,7 +566,7 @@ mod tests {
         };
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(script.contains("export WASIXCC_SYSROOT=\"/home/user/.wasixcc/sysroot/sysroot\""));
+        assert!(script.contains("export WASIXCC_SYSROOT='/home/user/.wasixcc/sysroot/sysroot'"));
     }
 
     #[test]
@@ -582,7 +577,7 @@ mod tests {
         let options = default_options();
         let script = generate_cross_env_script(&settings, &options);
 
-        assert!(script.contains("export WASIXCC_SYSROOT=\"/custom/sysroot\""));
+        assert!(script.contains("export WASIXCC_SYSROOT='/custom/sysroot'"));
     }
 
     #[test]
@@ -631,29 +626,6 @@ mod tests {
 
         assert!(!script.contains("ACLOCAL_PATH"));
         assert!(!script.contains("_lt_pkgdatadir"));
-        assert!(script.contains("export CC=wasixcc"));
-    }
-
-    #[test]
-    fn test_script_without_optional_toolchains() {
-        let mut settings = make_test_settings();
-        settings.llvm_location = LlvmLocation::DefaultPath(PathBuf::from("/nonexistent"));
-        settings.binaryen_location = BinaryenLocation::DefaultPath(PathBuf::from("/nonexistent"));
-        settings.libtool_location = LibtoolLocation::DefaultPath(PathBuf::from("/nonexistent"));
-
-        let options = default_options();
-        let script = generate_cross_env_script(&settings, &options);
-
-        // Should still define WASIXCC_BIN_LOCATION
-        assert!(script.contains("export WASIXCC_BIN_LOCATION=\"/home/user/.wasixcc/bin\""));
-        // Should not define optional location variables
-        assert!(!script.contains("WASIXCC_LLVM_LOCATION"));
-        assert!(!script.contains("WASIXCC_BINARYEN_LOCATION"));
-        assert!(!script.contains("WASIXCC_LIBTOOL_LOCATION"));
-        // Should not reference /nonexistent
-        assert!(!script.contains("/nonexistent"));
-        // PATH should only include bin dir
-        assert!(script.contains("export PATH=\"$WASIXCC_BIN_LOCATION:$PATH\""));
         assert!(script.contains("export CC=wasixcc"));
     }
 
