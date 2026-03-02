@@ -218,6 +218,8 @@ runs:
     - name: Install wasixcc
       id: install-wasixcc
       shell: sh
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         tar -xzf wasixcc.tar.gz
         rm wasixcc.tar.gz
