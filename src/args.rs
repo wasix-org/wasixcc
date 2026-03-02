@@ -184,6 +184,7 @@ pub struct UserSettings {
     pub location: PathBuf,                      // key name: LOCATION
     pub bin_location: PathBuf,                  // key name: BIN_LOCATION
     pub include_usr_dirs: bool,                 // key name: INCLUDE_USR_DIRS
+    pub ignore_some_warnings: bool,             // key name: IGNORE_SOME_WARNINGS
 }
 
 #[cfg(test)]
@@ -466,6 +467,13 @@ pub fn gather_user_settings(
         None => false,
     };
 
+    let ignore_some_warnings = match try_get_user_setting_value("IGNORE_SOME_WARNINGS", args, envs)?
+    {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for IGNORE_SOME_WARNINGS"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
@@ -496,6 +504,7 @@ pub fn gather_user_settings(
         location,
         bin_location,
         include_usr_dirs,
+        ignore_some_warnings,
     })
 }
 

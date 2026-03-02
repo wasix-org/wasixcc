@@ -371,6 +371,35 @@ fn compile_inputs(state: &mut State) -> Result<()> {
         command_args.push(OsStr::new("-fno-exceptions"));
     }
 
+    if state.user_settings.ignore_some_warnings {
+        // Disable some new warnings
+        command_args.push(OsStr::new("-Wno-int-conversion"));
+        command_args.push(OsStr::new("-Wno-implicit-function-declaration"));
+        command_args.push(OsStr::new("-Wno-default-const-init-var-unsafe"));
+        command_args.push(OsStr::new("-Wno-error=deprecated-literal-operator"));
+        command_args.push(OsStr::new("-Wno-error=sign-conversion"));
+        command_args.push(OsStr::new("-Wno-error=character-conversion"));
+
+        // This allows us to compile some ancient shitty code without failing. We should move these flags to the appropriate place in build-scripts
+        command_args.push(OsStr::new("-Wno-error=implicit-fallthrough"));
+        command_args.push(OsStr::new("-Wno-error=nontrivial-memcall"));
+        command_args.push(OsStr::new("-Wno-error=zero-as-null-pointer-constant"));
+        command_args.push(OsStr::new("-Wno-error=unsafe-buffer-usage"));
+        command_args.push(OsStr::new("-Wno-error=exceptions"));
+        command_args.push(OsStr::new("-Wno-error=padded"));
+        command_args.push(OsStr::new("-Wno-error=disabled-macro-expansion"));
+        command_args.push(OsStr::new("-Wno-error=suggest-override"));
+        command_args.push(OsStr::new("-Wno-error=suggest-destructor-override"));
+        command_args.push(OsStr::new("-Wno-error=extra-semi-stmt"));
+        command_args.push(OsStr::new(
+            "-Wno-error=deprecated-copy-with-user-provided-copy",
+        ));
+        command_args.push(OsStr::new("-Wno-error=format"));
+        command_args.push(OsStr::new("-Wno-error=shadow"));
+        command_args.push(OsStr::new("-Wno-error=c++98-compat-pedantic"));
+        command_args.push(OsStr::new("-Wno-error=unused-command-line-argument"));
+    }
+
     if state.user_settings.module_kind().requires_pic() || state.user_settings.pic {
         command_args.push(OsStr::new("-fPIC"));
         command_args.push(OsStr::new("-ftls-model=global-dynamic"));
