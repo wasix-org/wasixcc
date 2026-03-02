@@ -76,6 +76,18 @@ static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .into()
 });
 
+// Copied from clang's source code with all object file extensions removed.
+static CLANG_KNOWN_COMPILER_INPUT_EXTENSIONS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    [
+        "c", "C", "F", "f", "h", "H", "i", "m", "M", "S", "s", "bc", "cc", "CC", "cl", "cli",
+        "clcpp", "clii", "cp", "cu", "hh", "ii", "ll", "mi", "mm", "adb", "ads", "asm", "ast",
+        "ccm", "cpp", "CPP", "c++", "C++", "cui", "cxx", "CXX", "F03", "f03", "F08", "f08", "F90",
+        "f90", "F95", "f95", "for", "FOR", "fpp", "FPP", "gch", "hip", "hipi", "hpp", "hxx", "iim",
+        "iih", "mii", "ifs", "pch", "pcm", "c++m", "cppm", "cxxm", "hlsl",
+    ]
+    .into()
+});
+
 static WASM_LD_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     [
         "--export",
@@ -289,11 +301,11 @@ fn process_compiler_flags<'a>(
         }
     }
 
-    let (linker_inputs, compiler_inputs) = inputs.into_iter().partition(|input| {
-        matches!(
-            input.extension().and_then(|ext| ext.to_str()),
-            Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
-        )
+    let (compiler_inputs, linker_inputs) = inputs.into_iter().partition(|input| {
+        input.extension().iter().all(|ext| {
+            CLANG_KNOWN_COMPILER_INPUT_EXTENSIONS
+                .contains(ext.to_string_lossy().to_string().as_str())
+        })
     });
 
     let compiler_args = compiler_flags
