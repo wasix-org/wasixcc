@@ -119,7 +119,7 @@ summary is provided here for reference:
 | `WASM_OPT_SUPPRESS_DEFAULT`     | Suppress default wasm-opt flags                                                                |
 | `WASM_OPT_PRESERVE_UNOPTIMIZED` | Whether to preserve the unoptimized binary in a temp directory                                 |
 | `MODULE_KIND`                   | Module type (static-main, dynamic-main, shared-library, object-file)                           |
-| `WASM_EXCEPTIONS`               | Enable WASM exception handling. (yes, no, legacy, exnref)                                              |
+| `WASM_EXCEPTIONS`               | Enable WASM exception handling. (yes, no, legacy, exnref)                                      |
 | `PIC`                           | Enable position-independent code                                                               |
 | `LINK_SYMBOLIC`                 | Enable -Bsymbolic linking (enabled by default)                                                 |
 | `GENERATE_SHELL_SCRIPT`         | Generate a shell script for running the resulting WASM binary as if it was a native executable |
@@ -128,6 +128,8 @@ summary is provided here for reference:
 | `AUTOCONF_WORKAROUNDS`          | Attempt to detect autoconf tests and make them work as intended.                               |
 | `LOCATION`                      | The resource dir of wasixcc. Defaults to `~/.wasixcc`                                          |
 | `BIN_LOCATION`                  | Where the wasixcc binaries are installed. Defaults to `LOCATION/bin`                           |
+| `INCLUDE_USR_DIRS`              | Also add `usr` and `usr/local` in the sysroot to the linker and include path                   |
+| `IGNORE_SOME_WARNINGS`          | Ignore some warnings; mostly to make old code compile that sets all warnings as errors         |
 
 ### Environment Variables
 
