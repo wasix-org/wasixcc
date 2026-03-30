@@ -1,6 +1,6 @@
 [package]
 name = "wasmer/wasixcc"
-version = "0.4.2"
+version = "0.4.3"
 entrypoint = "wasixcc"
 
 [dependencies]
