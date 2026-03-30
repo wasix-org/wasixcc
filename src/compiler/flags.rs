@@ -692,8 +692,10 @@ mod tests {
 
     #[test]
     fn test_autoconf_workaround() {
-        let mut us = UserSettings::default();
-        us.autoconf_workarounds = true;
+        let mut us = UserSettings {
+            autoconf_workarounds: true,
+            ..Default::default()
+        };
         let args = vec![
             "-o".to_string(),
             "conftest".to_string(),
@@ -733,8 +735,10 @@ mod tests {
 
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_wl() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
         let args = vec![
             "-Wl,--start-group".to_string(),
             "-Wl,--end-group".to_string(),
@@ -753,8 +757,10 @@ mod tests {
 
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_multiple_via_wl() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
         let args = vec![
             "-Wl,--end-group".to_string(),
             "-Wl,--end-group,-L/some/path/a,--end-group".to_string(),
@@ -797,8 +803,10 @@ mod tests {
 
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_xlinker() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
         let args = vec![
             "-Xlinker".to_string(),
             "--start-group".to_string(),
@@ -818,8 +826,10 @@ mod tests {
 
     #[test]
     fn test_prepare_compiler_args_discard_linker_flags_via_xlinker_two_arg() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
         let args = vec![
             "-Xlinker".to_string(),
             "--start-group".to_string(),
@@ -862,8 +872,10 @@ mod tests {
 
     #[test]
     fn test_prepare_linker_args_discard_flags() {
-        let mut us = UserSettings::default();
-        us.discard_unsupported_flags = true;
+        let mut us = UserSettings {
+            discard_unsupported_flags: true,
+            ..Default::default()
+        };
         let args = vec![
             "--start-group".to_string(),
             "--end-group".to_string(),
