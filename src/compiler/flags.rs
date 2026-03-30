@@ -188,14 +188,12 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-c" | "-S" | "-E") => {
             user_settings.module_kind = Some(ModuleKind::ObjectFile);
         }
-        Flag::Simple("-shared")
-            if user_settings.module_kind.is_none() => {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-            }
-        Flag::Simple("-pie")
-            if user_settings.module_kind.is_none() => {
-                user_settings.module_kind = Some(ModuleKind::DynamicMain);
-            }
+        Flag::Simple("-shared") if user_settings.module_kind.is_none() => {
+            user_settings.module_kind = Some(ModuleKind::SharedLibrary);
+        }
+        Flag::Simple("-pie") if user_settings.module_kind.is_none() => {
+            user_settings.module_kind = Some(ModuleKind::DynamicMain);
+        }
         _ => {}
     }
 }
@@ -203,14 +201,12 @@ fn update_build_settings_from_compiler_flag(
 // Update the build settings based on a standalone linker argument
 fn update_build_settings_from_linker_flag(linker_flag: &Flag, user_settings: &mut UserSettings) {
     match linker_flag {
-        Flag::Simple("-shared")
-            if user_settings.module_kind.is_none() => {
-                user_settings.module_kind = Some(ModuleKind::SharedLibrary);
-            }
-        Flag::Simple("-pie")
-            if user_settings.module_kind.is_none() => {
-                user_settings.module_kind = Some(ModuleKind::DynamicMain);
-            }
+        Flag::Simple("-shared") if user_settings.module_kind.is_none() => {
+            user_settings.module_kind = Some(ModuleKind::SharedLibrary);
+        }
+        Flag::Simple("-pie") if user_settings.module_kind.is_none() => {
+            user_settings.module_kind = Some(ModuleKind::DynamicMain);
+        }
         _ => {}
     }
 }
