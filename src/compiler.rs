@@ -23,6 +23,12 @@ static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-bulk-memory",
     "--enable-bulk-memory-opt",
     "--enable-exception-handling",
+    "--enable-simd",
+    "--enable-relaxed-simd",
+    "--enable-extended-const",
+    // Unsupported by wasm-opt right now:
+    // https://github.com/WebAssembly/binaryen/issues/8544
+    // "--enable-wide-arithmetic",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -60,6 +60,16 @@ static CLANG_FLAGS_WITH_OPTIONAL_ARGS: LazyLock<HashSet<&str>> =
 static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-L", "-l"].into());
 
+// A set of non-default WA features supported by Cranelift/LLVM Wasmer compilers.
+static DEFAULT_WASM_CLANG_FLAGS: &[&str] = &[
+    "-msimd128",
+    "-mrelaxed-simd",
+    "-mextended-const",
+    // Unsupported by wasm-opt right now:
+    // https://github.com/WebAssembly/binaryen/issues/8544
+    // "-mwide-arithmetic",
+];
+
 // We always specify values for these flags according to the build configuration, so
 // they must be discarded even if they're provided externally
 static CLANG_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
@@ -421,7 +431,10 @@ pub(super) fn prepare_compiler_args(
         use_wasm_opt: true,
     };
 
-    let args = add_extra_compiler_flags(args, user_settings, run_cxx);
+    let args = DEFAULT_WASM_CLANG_FLAGS
+        .iter()
+        .map(|flag| (*flag).to_owned())
+        .chain(add_extra_compiler_flags(args, user_settings, run_cxx));
     let args = resolve_response_files(args)?;
 
     let flags = lex_compiler_args(args.iter())?;
@@ -547,8 +560,16 @@ mod tests {
         ];
         let (pa, bs) = prepare_compiler_args(args, &mut us, false).unwrap();
 
-        // Only -O2 should survive in compiler_args
-        assert_eq!(pa.compiler_args, vec!["-O2".to_string()]);
+        // Only the default wasm feature flags and -O2 should survive in compiler_args
+        assert_eq!(
+            pa.compiler_args,
+            vec![
+                "-msimd128".to_string(),
+                "-mrelaxed-simd".to_string(),
+                "-mextended-const".to_string(),
+                "-O2".to_string(),
+            ]
+        );
         assert_eq!(bs.opt_level, OptLevel::O2);
         // -fwasm-exceptions side-effect should still take effect even though the flag is discarded
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
@@ -618,7 +639,16 @@ mod tests {
         assert_eq!(bs.debug_level, DebugLevel::G0);
         assert!(!bs.use_wasm_opt);
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
-        assert_eq!(pa.compiler_args, vec!["-O2".to_string(), "-g0".to_string()]);
+        assert_eq!(
+            pa.compiler_args,
+            vec![
+                "-msimd128".to_string(),
+                "-mrelaxed-simd".to_string(),
+                "-mextended-const".to_string(),
+                "-O2".to_string(),
+                "-g0".to_string(),
+            ]
+        );
         assert_eq!(
             pa.linker_args,
             vec!["-foo".to_string(), "-z".to_string(), "zo".to_string()]
@@ -675,6 +705,30 @@ mod tests {
         assert_eq!(us.run_wasm_opt, Some(false));
         // Should have added --no-shlib-sigcheck
         assert_eq!(pa.linker_args, vec!["--no-shlib-sigcheck".to_string()]);
+    }
+
+    #[test]
+    fn test_explicit_wasm_feature_flags_override_defaults() {
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-mno-simd128".to_string(),
+            "-mno-relaxed-simd".to_string(),
+            "-mno-extended-const".to_string(),
+            "test.c".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        assert_eq!(
+            pa.compiler_args,
+            vec![
+                "-msimd128".to_string(),
+                "-mrelaxed-simd".to_string(),
+                "-mextended-const".to_string(),
+                "-mno-simd128".to_string(),
+                "-mno-relaxed-simd".to_string(),
+                "-mno-extended-const".to_string(),
+            ]
+        );
     }
 
     #[test]
