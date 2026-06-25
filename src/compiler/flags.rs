@@ -153,6 +153,8 @@ static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
         "--allow-shlib-undefined",
         "--enable-new-dtags",
         "--version-script",
+        "--no-undefined-version", // wasm-ld has no symbol versioning
+        "--undefined-version",    // wasm-ld has no symbol versioning
         "--stats",
         "--no-stats",
     ]
