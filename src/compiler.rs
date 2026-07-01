@@ -487,6 +487,21 @@ fn link_inputs(state: &State) -> Result<()> {
         }
     }
 
+    // A C++ shared library (e.g. a CPython extension module) may be loaded by a host
+    // that doesn't export the C++ runtime -- the CPython interpreter is plain C -- so
+    // its libc++/libc++abi references would otherwise be left as unresolved dynamic
+    // imports (SharedLibrary sets --unresolved-symbols=import-dynamic below) and fail
+    // at load. Link the runtime into the module instead. Only SharedLibrary reaches
+    // here; executables get the C++ runtime in the block above. wasm-ld extracts
+    // archive members lazily regardless of command-line order, so only the referenced
+    // members are pulled in.
+    if !module_kind.is_executable() && (state.cxx || state.user_settings.include_cpp_symbols) {
+        command.args(["-lc++", "-lc++abi"]);
+        if state.user_settings.wasm_exceptions.is_enabled() {
+            command.arg("-lunwind");
+        }
+    }
+
     if matches!(module_kind, ModuleKind::DynamicMain) {
         command.args(["--no-whole-archive"]);
     }
