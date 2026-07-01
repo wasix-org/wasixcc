@@ -135,8 +135,14 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
         } else {
             "clang"
         }));
+        let user_set_linker = original_args.iter().any(|a| a.starts_with("-fuse-ld"));
         command.args(original_args);
         command.args([OsStr::new("--target=wasm32-wasi")]);
+        if !user_set_linker {
+            let mut fuse_ld = OsString::from("-fuse-ld=");
+            fuse_ld.push(user_settings.llvm_location.get_tool_path("wasm-ld"));
+            command.arg(fuse_ld);
+        }
         return run_command(command);
     }
 
