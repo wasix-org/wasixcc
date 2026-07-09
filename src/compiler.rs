@@ -100,13 +100,68 @@ pub(crate) struct BuildSettings {
     use_wasm_opt: bool,
 }
 
+/// A single user-supplied token destined for the link stage. Flags (`-Wl`,
+/// `-Xlinker`, forwarded `-L`/`-l`, ...) and file inputs (`.o`/`.a`/...) share
+/// one ordered stream so their original left-to-right order survives: e.g.
+/// `--whole-archive foo.a --no-whole-archive` must stay contiguous, otherwise
+/// the bracket wraps nothing and `foo.a` is linked lazily outside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LinkToken {
+    Flag(String),
+    Input(PathBuf),
+}
+
 #[derive(Debug)]
 pub(crate) struct PreparedArgs {
     compiler_args: Vec<String>,
-    linker_args: Vec<String>,
+    // User link-stage tokens in original order. wasixcc's own injected flags and
+    // sysroot libs are added separately in `link_inputs`.
+    link_args: Vec<LinkToken>,
     compiler_inputs: Vec<PathBuf>,
-    linker_inputs: Vec<PathBuf>,
     output: Option<PathBuf>,
+}
+
+impl PreparedArgs {
+    fn has_linker_inputs(&self) -> bool {
+        self.link_args
+            .iter()
+            .any(|token| matches!(token, LinkToken::Input(_)))
+    }
+
+    #[cfg(test)]
+    fn linker_flags(&self) -> Vec<String> {
+        self.link_args
+            .iter()
+            .filter_map(|token| match token {
+                LinkToken::Flag(flag) => Some(flag.clone()),
+                LinkToken::Input(_) => None,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn linker_inputs(&self) -> Vec<PathBuf> {
+        self.link_args
+            .iter()
+            .filter_map(|token| match token {
+                LinkToken::Input(input) => Some(input.clone()),
+                LinkToken::Flag(_) => None,
+            })
+            .collect()
+    }
+
+    // The ordered user link stream as `link_inputs` emits it to wasm-ld (flags
+    // and inputs interleaved), for asserting relative order in tests.
+    #[cfg(test)]
+    fn link_stream(&self) -> Vec<String> {
+        self.link_args
+            .iter()
+            .map(|token| match token {
+                LinkToken::Flag(flag) => flag.clone(),
+                LinkToken::Input(input) => input.to_string_lossy().into_owned(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -127,7 +182,7 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
     tracing::debug!("Build settings: {build_settings:?}");
     tracing::debug!("Compiler/linker args: {args:?}");
 
-    if args.compiler_inputs.is_empty() && args.linker_inputs.is_empty() {
+    if args.compiler_inputs.is_empty() && !args.has_linker_inputs() {
         // If there are no inputs, just pass everything through to clang.
         // This lets us support invocations such as `wasixcc -dumpmachine`.
         let mut command = Command::new(user_settings.llvm_location.get_tool_path(if run_cxx {
@@ -196,7 +251,7 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
     tracing::debug!("User settings: {user_settings:?}");
     tracing::debug!("Linker args: {args:?}");
 
-    if args.linker_inputs.is_empty() {
+    if !args.has_linker_inputs() {
         // If there are no inputs, just pass everything through to wasm-ld.
         let mut command = Command::new(user_settings.llvm_location.get_tool_path("wasm-ld"));
         command.args(original_args);
@@ -369,7 +424,9 @@ fn compile_inputs(state: &mut State) -> Result<()> {
             };
 
             command.arg("-o").arg(&output_path);
-            state.args.linker_inputs.push(output_path);
+            // Compiled objects follow the user link tokens, matching the prior
+            // behaviour where they were appended after user inputs.
+            state.args.link_args.push(LinkToken::Input(output_path));
 
             run_command(command)?;
         }
@@ -400,144 +457,167 @@ fn link_inputs(state: &State) -> Result<()> {
     let sysroot_lib_path = sysroot_path.join("lib");
     let sysroot_lib_wasm32_path = sysroot_lib_path.join("wasm32-wasi");
 
+    let args = build_link_args(state, &sysroot_lib_path, &sysroot_lib_wasm32_path)?;
+
     let mut command = Command::new(linker_path);
+    command.args(args);
 
-    command.args(&state.args.linker_args);
+    run_command(command)
+}
 
-    command.args([
-        "--extra-features=atomics",
-        "--extra-features=bulk-memory",
-        "--extra-features=mutable-globals",
-        "--shared-memory",
-        "--max-memory=4294967296", // TODO: make configurable
-        "--import-memory",
-        "--export-dynamic",
-        "--export=__wasm_call_ctors",
-        // Do not demangle the function names (happens by default)
-        "--no-demangle",
-    ]);
+// Assemble the full wasm-ld argument vector (everything after the tool name).
+// Kept separate from spawning so the ordering can be unit-tested.
+fn build_link_args(
+    state: &State,
+    sysroot_lib_path: &Path,
+    sysroot_lib_wasm32_path: &Path,
+) -> Result<Vec<OsString>> {
+    let module_kind = state.user_settings.module_kind();
+    let mut args: Vec<OsString> = Vec::new();
+
+    let mut push = |arg: &str| args.push(OsString::from(arg));
+
+    push("--extra-features=atomics");
+    push("--extra-features=bulk-memory");
+    push("--extra-features=mutable-globals");
+    push("--shared-memory");
+    push("--max-memory=4294967296"); // TODO: make configurable
+    push("--import-memory");
+    push("--export-dynamic");
+    push("--export=__wasm_call_ctors");
+    // Do not demangle the function names (happens by default)
+    push("--no-demangle");
 
     if state.user_settings.wasm_exceptions.is_enabled() {
-        command.args(["-mllvm", "--wasm-enable-eh"]);
-        command.args(["-mllvm", "--wasm-enable-sjlj"]);
+        push("-mllvm");
+        push("--wasm-enable-eh");
+        push("-mllvm");
+        push("--wasm-enable-sjlj");
 
         if state.user_settings.wasm_exceptions.is_legacy() {
-            command.args(["-mllvm", "--wasm-use-legacy-eh=true"]);
+            push("-mllvm");
+            push("--wasm-use-legacy-eh=true");
         } else {
-            command.args(["-mllvm", "--wasm-use-legacy-eh=false"]);
+            push("-mllvm");
+            push("--wasm-use-legacy-eh=false");
         }
 
         // Use native wasm exceptions
-        command.args(["-mllvm", "--exception-model=wasm"]);
+        push("-mllvm");
+        push("--exception-model=wasm");
     }
 
-    let module_kind = state.user_settings.module_kind();
-
-    command.args([
-        "--export=__wasm_init_tls",
-        "--export=__wasm_signal",
-        "--export=__tls_size",
-        "--export=__tls_align",
-        "--export=__tls_base",
-        "--export-if-defined=__indirect_function_table", // needed for reflection and call_dynamic
-    ]);
+    push("--export=__wasm_init_tls");
+    push("--export=__wasm_signal");
+    push("--export=__tls_size");
+    push("--export=__tls_align");
+    push("--export=__tls_base");
+    push("--export-if-defined=__indirect_function_table"); // needed for reflection and call_dynamic
 
     if module_kind.is_executable() {
-        command.args([
-            "--export-if-defined=__stack_pointer",
-            "--export-if-defined=__heap_base",
-            "--export-if-defined=__data_end",
-        ]);
+        push("--export-if-defined=__stack_pointer");
+        push("--export-if-defined=__heap_base");
+        push("--export-if-defined=__data_end");
     }
 
     if matches!(module_kind, ModuleKind::DynamicMain) {
-        command.args(["--whole-archive", "--export-all"]);
+        push("--whole-archive");
+        push("--export-all");
     }
 
     // Make sysroots libs available to all modules so they can optionally
     // link against them if needed, even when we don't.
     let mut lib_arg = OsString::new();
     lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_path);
-    command.arg(lib_arg);
+    lib_arg.push(sysroot_lib_path);
+    args.push(lib_arg);
 
     let mut lib_arg = OsString::new();
     lib_arg.push("-L");
-    lib_arg.push(&sysroot_lib_wasm32_path);
-    command.arg(lib_arg);
+    lib_arg.push(sysroot_lib_wasm32_path);
+    args.push(lib_arg);
+
+    let mut push = |arg: &str| args.push(OsString::from(arg));
 
     if module_kind.is_executable() {
-        command.args([
-            "-lwasi-emulated-getpid",
-            "-lwasi-emulated-mman",
-            "-lwasi-emulated-process-clocks",
-            "-lc",
-            "-lresolv",
-            "-lrt",
-            "-lm",
-            "-lpthread",
-            "-lutil",
-        ]);
+        push("-lwasi-emulated-getpid");
+        push("-lwasi-emulated-mman");
+        push("-lwasi-emulated-process-clocks");
+        push("-lc");
+        push("-lresolv");
+        push("-lrt");
+        push("-lm");
+        push("-lpthread");
+        push("-lutil");
 
         if state.cxx || state.user_settings.include_cpp_symbols {
-            command.args(["-lc++", "-lc++abi"]);
+            push("-lc++");
+            push("-lc++abi");
             if state.user_settings.wasm_exceptions.is_enabled() {
-                command.arg("-lunwind");
+                push("-lunwind");
             }
         }
     }
 
     if matches!(module_kind, ModuleKind::DynamicMain) {
-        command.args(["--no-whole-archive"]);
+        push("--no-whole-archive");
     }
 
     // Link as much as needed out of libclang_rt.builtins regardless of module kind.
-    command.arg("-lclang_rt.builtins-wasm32");
+    push("-lclang_rt.builtins-wasm32");
 
-    if state.user_settings.module_kind().requires_pic() {
-        command.args([
-            "--experimental-pic",
-            "--export-if-defined=__wasm_apply_data_relocs",
-            "--export-if-defined=__wasm_apply_tls_relocs",
-        ]);
+    if module_kind.requires_pic() {
+        push("--experimental-pic");
+        push("--export-if-defined=__wasm_apply_data_relocs");
+        push("--export-if-defined=__wasm_apply_tls_relocs");
     }
 
     match module_kind {
         ModuleKind::StaticMain => {
             // TODO: make configurable
-            command.args(["-z", "stack-size=8388608"]);
+            push("-z");
+            push("stack-size=8388608");
         }
 
         ModuleKind::DynamicMain => {
-            command.args(["-pie", "-lcommon-tag-stubs"]);
+            push("-pie");
+            push("-lcommon-tag-stubs");
         }
 
         ModuleKind::SharedLibrary => {
-            command.args([
-                "-shared",
-                "--no-entry",
-                "--unresolved-symbols=import-dynamic",
-            ]);
+            push("-shared");
+            push("--no-entry");
+            push("--unresolved-symbols=import-dynamic");
             if state.user_settings.link_symbolic {
-                command.arg("-Bsymbolic");
+                push("-Bsymbolic");
             }
         }
 
         ModuleKind::ObjectFile => panic!("Internal error: object files can't be linked"),
     }
 
-    command.args(&state.args.linker_inputs);
-
-    if module_kind.is_executable() {
-        command.arg(sysroot_lib_wasm32_path.join("crt1.o"));
-    } else {
-        command.arg(sysroot_lib_wasm32_path.join("scrt1.o"));
+    // User link tokens as one ordered stream, so --whole-archive/--no-whole-archive
+    // pairs keep their archive bracketed. Placed after the DynamicMain whole-archive
+    // block: a trailing user -l for a lib that block already force-included would
+    // otherwise re-pull it and produce a duplicate-symbol error. Lazy resolution
+    // still binds user objects to the sysroot -lc above.
+    for token in &state.args.link_args {
+        match token {
+            LinkToken::Flag(flag) => args.push(OsString::from(flag)),
+            LinkToken::Input(input) => args.push(input.clone().into_os_string()),
+        }
     }
 
-    command.arg("-o");
-    command.arg(output_path(state)?);
+    if module_kind.is_executable() {
+        args.push(sysroot_lib_wasm32_path.join("crt1.o").into_os_string());
+    } else {
+        args.push(sysroot_lib_wasm32_path.join("scrt1.o").into_os_string());
+    }
 
-    run_command(command)
+    args.push(OsString::from("-o"));
+    args.push(output_path(state)?.into_os_string());
+
+    Ok(args)
 }
 
 fn run_wasm_opt(state: &State) -> Result<()> {
@@ -799,9 +879,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("test_output")),
             },
             cxx: false,
@@ -827,9 +906,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("myprogram")),
             },
             cxx: false,
@@ -855,9 +933,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("myprogram.wasm")),
             },
             cxx: false,
@@ -884,9 +961,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: None,
             },
             cxx: false,
@@ -912,9 +988,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("myprogram")),
             },
             cxx: false,
@@ -941,9 +1016,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("/path/to/output")),
             },
             cxx: false,
@@ -970,9 +1044,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(PathBuf::from("myprogram.wasm")),
             },
             cxx: false,
@@ -1002,9 +1075,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(output_path.clone()),
             },
             cxx: false,
@@ -1064,9 +1136,8 @@ mod tests {
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
-                linker_args: Vec::new(),
+                link_args: Vec::new(),
                 compiler_inputs: Vec::new(),
-                linker_inputs: Vec::new(),
                 output: Some(output_path.clone()),
             },
             cxx: false,
@@ -1132,7 +1203,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            prepared.linker_args,
+            prepared.linker_flags(),
             vec![
                 "-lmylib".to_string(),
                 "--version-script,/path/to/script".to_string(),
@@ -1142,6 +1213,100 @@ mod tests {
         assert_eq!(
             prepared.output,
             Some(PathBuf::from("--version-script=foo.txt"))
+        );
+    }
+
+    fn link_args_state(module_kind: ModuleKind, link_args: Vec<LinkToken>) -> State {
+        let us = UserSettings {
+            module_kind: Some(module_kind),
+            ..Default::default()
+        };
+        State {
+            user_settings: us,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: false,
+            },
+            args: PreparedArgs {
+                compiler_args: Vec::new(),
+                link_args,
+                compiler_inputs: Vec::new(),
+                output: Some(PathBuf::from("out.wasm")),
+            },
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        }
+    }
+
+    fn rendered_link_args(state: &State) -> Vec<String> {
+        // Arbitrary sysroot paths; build_link_args does not touch the filesystem.
+        build_link_args(
+            state,
+            Path::new("/sysroot/lib"),
+            Path::new("/sysroot/lib/wasm32-wasi"),
+        )
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn test_dynamic_main_user_lib_emitted_after_whole_archive_block() {
+        // Regression: for DynamicMain, wasixcc force-includes the sysroot libs via
+        // its own --whole-archive block. A user -l naming the same archive must be
+        // emitted AFTER --no-whole-archive, otherwise (with a referencing object
+        // ahead of it) it lazily pulls a member the block also force-pulls, and
+        // wasm-ld reports a duplicate symbol.
+        let state = link_args_state(
+            ModuleKind::DynamicMain,
+            vec![
+                LinkToken::Input(PathBuf::from("main.o")),
+                LinkToken::Flag("-lwasi-emulated-process-clocks".to_string()),
+            ],
+        );
+        let args = rendered_link_args(&state);
+
+        let nwa = args
+            .iter()
+            .position(|a| a == "--no-whole-archive")
+            .expect("DynamicMain must close its whole-archive block");
+        // wasixcc still injects its own copy inside the block.
+        let injected = args
+            .iter()
+            .position(|a| a == "-lwasi-emulated-process-clocks")
+            .unwrap();
+        let user = args
+            .iter()
+            .rposition(|a| a == "-lwasi-emulated-process-clocks")
+            .unwrap();
+        assert!(injected < nwa, "injected lib should sit inside the block");
+        assert!(
+            user > nwa,
+            "user -l must follow --no-whole-archive, got {args:?}"
+        );
+    }
+
+    #[test]
+    fn test_user_whole_archive_bracket_contiguous_in_link_args() {
+        // A user --whole-archive <archive> --no-whole-archive must reach wasm-ld
+        // contiguous so the archive is bracketed. wasixcc injects no whole-archive
+        // block for SharedLibrary, so nothing splits the stream.
+        let state = link_args_state(
+            ModuleKind::SharedLibrary,
+            vec![
+                LinkToken::Flag("--whole-archive".to_string()),
+                LinkToken::Input(PathBuf::from("libtest.a")),
+                LinkToken::Flag("--no-whole-archive".to_string()),
+            ],
+        );
+        let args = rendered_link_args(&state);
+
+        let wa = args.iter().position(|a| a == "--whole-archive").unwrap();
+        assert_eq!(
+            &args[wa..wa + 3],
+            &["--whole-archive", "libtest.a", "--no-whole-archive"]
         );
     }
 }
