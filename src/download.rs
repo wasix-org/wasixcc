@@ -97,11 +97,14 @@ impl FromStr for TagSpec {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == "latest" {
             Ok(TagSpec::Latest)
-        } else if s.starts_with('v') || s.starts_with("version_") {
+        } else if s.starts_with('v')
+            || s.starts_with("version_")
+            || s.starts_with(|c: char| c.is_ascii_digit())
+        {
             Ok(TagSpec::Tag(s.to_string()))
         } else {
             bail!(
-                "Invalid tag specification: `{s}`. Use 'latest', a tag starting with 'v', or 'version_XXX'."
+                "Invalid tag specification: `{s}`. Use 'latest', a tag starting with 'v', 'version_XXX', or a numeric version."
             );
         }
     }
