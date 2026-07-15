@@ -65,9 +65,7 @@ static DEFAULT_WASM_CLANG_FLAGS: &[&str] = &[
     "-msimd128",
     "-mrelaxed-simd",
     "-mextended-const",
-    // Unsupported by wasm-opt right now:
-    // https://github.com/WebAssembly/binaryen/issues/8544
-    // "-mwide-arithmetic",
+    "-mwide-arithmetic",
 ];
 
 // We always specify values for these flags according to the build configuration, so
@@ -561,6 +559,7 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
+                "-mwide-arithmetic".to_string(),
                 "-O2".to_string(),
             ]
         );
@@ -639,6 +638,7 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
+                "-mwide-arithmetic".to_string(),
                 "-O2".to_string(),
                 "-g0".to_string(),
             ]
@@ -710,6 +710,7 @@ mod tests {
             "-mno-simd128".to_string(),
             "-mno-relaxed-simd".to_string(),
             "-mno-extended-const".to_string(),
+            "-mno-wide-arithmetic".to_string(),
             "test.c".to_string(),
         ];
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
@@ -720,9 +721,11 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
+                "-mwide-arithmetic".to_string(),
                 "-mno-simd128".to_string(),
                 "-mno-relaxed-simd".to_string(),
                 "-mno-extended-const".to_string(),
+                "-mno-wide-arithmetic".to_string(),
             ]
         );
     }
