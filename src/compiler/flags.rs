@@ -1,13 +1,17 @@
 use crate::{
     args::UserSettings,
     compiler::{
-        BuildSettings, DebugLevel, ModuleKind, OptLevel, PreparedArgs, WasmExceptionStyle,
-        response_file,
+        BuildSettings, DebugLevel, LinkToken, ModuleKind, OptLevel, PreparedArgs,
+        WasmExceptionStyle, response_file,
     },
 };
 use anyhow::Result;
 use lexer::{Flag, lex_args};
-use std::{collections::HashSet, path::PathBuf, sync::LazyLock};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 mod lexer;
 
 static CLANG_FLAGS_WITH_ARGS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
@@ -231,15 +235,37 @@ fn lex_linker_args<'a>(
     )
 }
 
-/// Process the clang arguments into PreparedArgs, separating compiler args and linker args, and also extracting build settings from the args.
+// File extensions that mark a positional argument as a link-stage input
+// (object files and libraries) rather than a compiler source.
+fn is_linker_input(path: &str) -> bool {
+    matches!(
+        Path::new(path).extension().and_then(|ext| ext.to_str()),
+        Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
+    )
+}
+
+/// Result of splitting a clang command line: compiler-side pieces plus the
+/// ordered raw link-stage tokens (still to be re-lexed via `prepare_linker_args`).
+struct CompilerFlagResult {
+    compiler_args: Vec<String>,
+    compiler_inputs: Vec<PathBuf>,
+    // Link-stage tokens (from -Wl/-Xlinker/-z/-L/-l and positional inputs) in the
+    // order they appeared, so ordering-sensitive constructs like
+    // --whole-archive/--no-whole-archive brackets survive.
+    raw_link_tokens: Vec<String>,
+    output: Option<PathBuf>,
+}
+
+/// Process the clang arguments, separating compiler args from the ordered
+/// link-stage token stream, and also extracting build settings from the args.
 fn process_compiler_flags<'a>(
     flags: impl IntoIterator<Item = Flag<'a>>,
     build_settings: &mut BuildSettings,
     user_settings: &mut UserSettings,
-) -> Result<PreparedArgs> {
+) -> Result<CompilerFlagResult> {
     let mut compiler_flags = Vec::new();
-    let mut linker_args = Vec::new();
-    let mut inputs = Vec::new();
+    let mut raw_link_tokens = Vec::new();
+    let mut compiler_inputs = Vec::new();
     let mut output = None;
 
     for compiler_flag in flags {
@@ -247,11 +273,11 @@ fn process_compiler_flags<'a>(
             Flag::Simple(flag) | Flag::WithValue(flag, _, _)
                 if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD.contains(flag) =>
             {
-                linker_args.extend(compiler_flag.to_args());
+                raw_link_tokens.extend(compiler_flag.to_args());
             }
             Flag::Simple(flag) if flag.starts_with("-Wl,") => {
                 for split in flag["-Wl,".len()..].split(',') {
-                    linker_args.push(split.to_owned());
+                    raw_link_tokens.push(split.to_owned());
                 }
             }
             Flag::Simple(arg) | Flag::WithValue(arg, _, _)
@@ -265,17 +291,22 @@ fn process_compiler_flags<'a>(
                 tracing::debug!("Discarding flag '{}'", &compiler_flag);
             }
             Flag::WithValue("-Xlinker", value, _) => {
-                linker_args.push(value.to_owned());
+                raw_link_tokens.push(value.to_owned());
             }
             Flag::WithValue("-z", value, _) => {
-                linker_args.push("-z".to_owned());
-                linker_args.push(value.to_owned());
+                raw_link_tokens.push("-z".to_owned());
+                raw_link_tokens.push(value.to_owned());
             }
             Flag::WithValue("-o", value, _) => {
                 output = Some(PathBuf::from(value));
             }
+            // Object/library inputs join the link stream in place so they keep
+            // their order relative to -Wl flags; other positionals are sources.
+            Flag::Positional(value) if is_linker_input(value) => {
+                raw_link_tokens.push(value.to_owned());
+            }
             Flag::Positional(value) => {
-                inputs.push(PathBuf::from(value));
+                compiler_inputs.push(PathBuf::from(value));
             }
             Flag::Terminator() => {
                 compiler_flags.push(compiler_flag);
@@ -291,34 +322,27 @@ fn process_compiler_flags<'a>(
         }
     }
 
-    let (linker_inputs, compiler_inputs) = inputs.into_iter().partition(|input| {
-        matches!(
-            input.extension().and_then(|ext| ext.to_str()),
-            Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
-        )
-    });
-
     let compiler_args = compiler_flags
         .into_iter()
         .flat_map(|flag| flag.to_args().into_iter())
         .collect::<Vec<_>>();
 
-    Ok(PreparedArgs {
+    Ok(CompilerFlagResult {
         compiler_args,
-        linker_args,
         compiler_inputs,
-        linker_inputs,
+        raw_link_tokens,
         output,
     })
 }
 
 /// Process the wasm-ld arguments into PreparedArgs, extracting build settings from the args.
+/// The link-stage flags and inputs are kept in a single ordered stream so their
+/// original relative order (e.g. --whole-archive brackets) is preserved.
 fn process_linker_flags<'a>(
     flags: impl IntoIterator<Item = Flag<'a>>,
     user_settings: &mut UserSettings,
 ) -> Result<PreparedArgs> {
-    let mut linker_flags = Vec::new();
-    let mut inputs = Vec::new();
+    let mut link_args = Vec::new();
     let mut output = None;
 
     for linker_flag in flags {
@@ -333,33 +357,27 @@ fn process_linker_flags<'a>(
             Flag::WithValue("-o", value, _) => {
                 if user_settings.autoconf_workarounds && value == "conftest" {
                     user_settings.run_wasm_opt = Some(false);
-                    linker_flags.push(Flag::Simple("--no-shlib-sigcheck"));
+                    link_args.push(LinkToken::Flag("--no-shlib-sigcheck".to_owned()));
                 }
                 output = Some(PathBuf::from(value));
             }
             Flag::Positional(value) => {
-                inputs.push(PathBuf::from(value));
+                link_args.push(LinkToken::Input(PathBuf::from(value)));
             }
             Flag::Terminator() => {
-                linker_flags.push(linker_flag);
+                link_args.extend(linker_flag.to_args().into_iter().map(LinkToken::Flag));
             }
             Flag::Simple(_) | Flag::WithValue(_, _, _) => {
                 update_build_settings_from_linker_flag(&linker_flag, user_settings);
-                linker_flags.push(linker_flag);
+                link_args.extend(linker_flag.to_args().into_iter().map(LinkToken::Flag));
             }
         }
     }
 
-    let linker_args = linker_flags
-        .into_iter()
-        .flat_map(|flag| flag.to_args().into_iter())
-        .collect::<Vec<_>>();
-
     Ok(PreparedArgs {
         compiler_args: Vec::new(),
-        linker_args,
+        link_args,
         compiler_inputs: Vec::new(),
-        linker_inputs: inputs,
         output,
     })
 }
@@ -431,26 +449,35 @@ pub(super) fn prepare_compiler_args(
 
     let flags = lex_compiler_args(args.iter())?;
 
-    let mut result = process_compiler_flags(flags, &mut build_settings, user_settings)?;
+    let CompilerFlagResult {
+        compiler_args,
+        compiler_inputs,
+        mut raw_link_tokens,
+        output,
+    } = process_compiler_flags(flags, &mut build_settings, user_settings)?;
 
     if user_settings.autoconf_workarounds
-        && (result.compiler_inputs.contains(&"conftest.c".into())
-            || result.compiler_inputs.contains(&"conftest.cpp".into())
-            || result.output == Some("conftest".into()))
+        && (compiler_inputs.contains(&"conftest.c".into())
+            || compiler_inputs.contains(&"conftest.cpp".into())
+            || output == Some("conftest".into()))
     {
         // wasm opt fails if signature mismatches produce an invalid module
         user_settings.run_wasm_opt = Some(false);
         // Pass the flag to the linker to avoid shlib signature checks
-        result.linker_args.push("--no-shlib-sigcheck".to_owned());
+        raw_link_tokens.push("--no-shlib-sigcheck".to_owned());
     }
 
-    let linker_result = prepare_linker_args(result.linker_args, user_settings)?;
+    // Re-lex the raw link tokens through the wasm-ld path so -Wl/-Xlinker flags
+    // are correctly classified (flags vs inputs) and filtered, while their order
+    // is preserved by the single ordered stream.
+    let linker_result = prepare_linker_args(raw_link_tokens, user_settings)?;
 
-    result.linker_args = linker_result.linker_args;
-    result.linker_inputs.extend(linker_result.linker_inputs);
-    if result.output.is_none() {
-        result.output = linker_result.output;
-    }
+    let result = PreparedArgs {
+        compiler_args,
+        link_args: linker_result.link_args,
+        compiler_inputs,
+        output: output.or(linker_result.output),
+    };
 
     if user_settings.module_kind().requires_pic() {
         user_settings.pic = true;
@@ -566,12 +593,12 @@ mod tests {
         assert_eq!(bs.opt_level, OptLevel::O2);
         // -fwasm-exceptions side-effect should still take effect even though the flag is discarded
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
-        assert!(pa.linker_args.is_empty());
+        assert!(pa.linker_flags().is_empty());
         assert_eq!(
             pa.compiler_inputs,
             vec![PathBuf::from("not_discarded.c"), PathBuf::from("in.c")]
         );
-        assert!(pa.linker_inputs.is_empty());
+        assert!(pa.linker_inputs().is_empty());
     }
 
     #[test]
@@ -585,11 +612,11 @@ mod tests {
         ];
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec!["-lmylib".to_string(), "-l".to_string(), "mylib".to_string(),]
         );
         assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
-        assert!(pa.linker_inputs.is_empty());
+        assert!(pa.linker_inputs().is_empty());
     }
 
     #[test]
@@ -603,10 +630,10 @@ mod tests {
         ];
         let pa = prepare_linker_args(args, &mut us).unwrap();
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec!["-lmylib".to_string(), "-l".to_string(), "mylib".to_string(),]
         );
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
+        assert_eq!(pa.linker_inputs(), vec![PathBuf::from("input.o")]);
     }
 
     #[test]
@@ -644,17 +671,66 @@ mod tests {
             ]
         );
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec!["-foo".to_string(), "-z".to_string(), "zo".to_string()]
         );
         assert_eq!(pa.output, Some(PathBuf::from("out")));
         assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
+        // Inputs keep their original command-line order: `bar` (from -Wl,-foo,bar)
+        // and `baz` (from -Xlinker baz) precede the trailing positional `lib.o`.
         assert_eq!(
-            pa.linker_inputs,
+            pa.linker_inputs(),
             vec![
-                PathBuf::from("lib.o"),
                 PathBuf::from("bar"),
                 PathBuf::from("baz"),
+                PathBuf::from("lib.o"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_whole_archive_bracket_order_preserved() {
+        // Regression: -Wl,--whole-archive <archive> -Wl,--no-whole-archive must
+        // reach wasm-ld with the archive still bracketed between the two markers.
+        let mut us = UserSettings::default();
+        let args = vec![
+            "-Wl,--whole-archive".to_string(),
+            "foo.a".to_string(),
+            "-Wl,--no-whole-archive".to_string(),
+        ];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+        let stream = pa.link_stream();
+        let wa = stream.iter().position(|t| t == "--whole-archive").unwrap();
+        let archive = stream.iter().position(|t| t == "foo.a").unwrap();
+        let nwa = stream
+            .iter()
+            .position(|t| t == "--no-whole-archive")
+            .unwrap();
+        assert!(
+            wa < archive && archive < nwa,
+            "expected --whole-archive < foo.a < --no-whole-archive, got {stream:?}"
+        );
+        // And they must be contiguous: nothing injected between the markers.
+        assert_eq!(
+            &stream[wa..=nwa],
+            &["--whole-archive", "foo.a", "--no-whole-archive"]
+        );
+    }
+
+    #[test]
+    fn test_whole_archive_bracket_order_preserved_single_wl() {
+        // The same, but with all three tokens packed into one -Wl group, which
+        // is re-lexed and must still keep the archive between the markers.
+        let mut us = UserSettings::default();
+        let args = vec!["-Wl,--whole-archive,foo.a,--no-whole-archive".to_string()];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+        assert_eq!(
+            pa.link_stream(),
+            vec![
+                "--whole-archive".to_string(),
+                "foo.a".to_string(),
+                "--no-whole-archive".to_string(),
             ]
         );
     }
@@ -673,14 +749,14 @@ mod tests {
         let pa = prepare_linker_args(args, &mut us).unwrap();
         assert_eq!(pa.output, Some(PathBuf::from("out.wasm")));
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec![
                 "-shared".to_string(),
                 "-m".to_string(),
                 "module".to_string()
             ]
         );
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("mod.wasm")]);
+        assert_eq!(pa.linker_inputs(), vec![PathBuf::from("mod.wasm")]);
         assert_eq!(us.module_kind, Some(ModuleKind::SharedLibrary));
     }
 
@@ -700,7 +776,7 @@ mod tests {
         // Should have disabled wasm-opt
         assert_eq!(us.run_wasm_opt, Some(false));
         // Should have added --no-shlib-sigcheck
-        assert_eq!(pa.linker_args, vec!["--no-shlib-sigcheck".to_string()]);
+        assert_eq!(pa.linker_flags(), vec!["--no-shlib-sigcheck".to_string()]);
     }
 
     #[test]
@@ -749,7 +825,7 @@ mod tests {
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
         // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+        assert_eq!(pa.linker_flags(), vec!["-L/some/path".to_string()]);
     }
 
     #[test]
@@ -771,7 +847,7 @@ mod tests {
 
         // Only -L should be forwarded, all discard flags should be filtered out
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec![
                 "-L/some/path/a".to_string(),
                 "-L/some/path/b".to_string(),
@@ -793,7 +869,7 @@ mod tests {
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
         assert_eq!(
-            pa.linker_args,
+            pa.linker_flags(),
             vec!["--start-group".to_string(), "-L/some/path".to_string()]
         );
     }
@@ -818,7 +894,7 @@ mod tests {
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
         // Only -L should be forwarded, all discard flags should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+        assert_eq!(pa.linker_flags(), vec!["-L/some/path".to_string()]);
     }
 
     #[test]
@@ -845,7 +921,7 @@ mod tests {
         let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
 
         // Only -L should be forwarded, all discard flags (including their arguments) should be filtered out
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+        assert_eq!(pa.linker_flags(), vec!["-L/some/path".to_string()]);
     }
 
     #[test]
@@ -888,8 +964,8 @@ mod tests {
         ];
         let pa = prepare_linker_args(args, &mut us).unwrap();
 
-        assert_eq!(pa.linker_args, vec!["-L/some/path".to_string()]);
+        assert_eq!(pa.linker_flags(), vec!["-L/some/path".to_string()]);
         assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
-        assert_eq!(pa.linker_inputs, vec![PathBuf::from("input.o")]);
+        assert_eq!(pa.linker_inputs(), vec![PathBuf::from("input.o")]);
     }
 }
