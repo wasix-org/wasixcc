@@ -38,6 +38,12 @@ fn get_command_name() -> Result<String> {
         .context("Failed to get executable file name")?
         .to_str()
         .context("Non-UTF8 characters in executable name")?;
+    // When running as a WASIX module (or on Windows), the executable name
+    // carries an extension, e.g. wasixccenv.wasm.
+    let exe_name = exe_name
+        .strip_suffix(".wasm")
+        .or_else(|| exe_name.strip_suffix(".exe"))
+        .unwrap_or(exe_name);
     if let Some(command_name) = exe_name.strip_prefix("wasix-") {
         Ok(command_name.to_owned())
     } else if let Some(command_name) = exe_name.strip_prefix("wasix") {
