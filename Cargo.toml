@@ -1,6 +1,6 @@
 [package]
 name = "wasixcc"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/wasix-org/wasixcc"
@@ -30,8 +30,8 @@ tar = "0.4.44"
 serde = { version = "1.0.219", features = ["derive"] }
 
 # Pinned dependencies for WASIX builds
-getrandom = "=0.3.3"
-reqwest = { version = "=0.12.22", features = [
+getrandom = "0.3.3"
+reqwest = { version = "0.12.22", features = [
     "blocking",
     "charset",
     "h2",
@@ -39,30 +39,15 @@ reqwest = { version = "=0.12.22", features = [
     "json",
     "rustls-tls",
 ], default-features = false }
-tower = "=0.5.2"
-tower-layer = "=0.3.3"
-tower-service = "=0.3.3"
+tower = "0.5.2"
+tower-layer = "0.3.3"
+tower-service = "0.3.3"
 fs_extra = "1.3.0"
 shell-words = "1.1.1"
-rustls-native-certs = "0.8.3"
+rustls-native-certs = "0.8.1"
 webpki-roots = "1.0.4"
 rustls = "0.23.35"
 clap = { version = "4.5.50", features = ["derive", "wrap_help"] }
-
-# We're not building for WASIX yet, so let's take the official packages for now
-# [patch.crates-io]
-# getrandom = { git = "https://github.com/wasix-org/getrandom", branch = "wasix-0.3.3" }
-# socket2 = { git = "https://github.com/wasix-org/socket2.git", branch = "wasix-0.6.0" }
-# tokio = { git = "https://github.com/wasix-org/tokio.git", branch = "wasix-1.47.0" }
-# tokio-rustls = { git = "https://github.com/wasix-org/tokio-rustls.git", branch = "wasix-0.26.2" }
-# hyper = { git = "https://github.com/wasix-org/hyper.git", branch = "wasix-1.6.0" }
-# hyper-util = { git = "https://github.com/wasix-org/hyper-util.git", branch = "wasix-0.1.16" }
-# hyper-rustls = { git = "https://github.com/wasix-org/hyper-rustls.git", branch = "wasix-0.27.7" }
-# rustls = { git = "https://github.com/wasix-org/rustls.git", branch = "wasix-0.23.31" }
-# reqwest = { git = "https://github.com/wasix-org/reqwest", branch = "wasix-0.12.22" }
-# tower = { git = "https://github.com/wasix-org/tower.git", branch = "wasix-0.5.2" }
-# tower-layer = { git = "https://github.com/wasix-org/tower.git", branch = "wasix-0.5.2" }
-# tower-service = { git = "https://github.com/wasix-org/tower.git", branch = "wasix-0.5.2" }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [

@@ -2,7 +2,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::{

@@ -217,6 +217,7 @@ pub(crate) fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> 
     download_asset(asset, &target_dir, &client)
         .with_context(|| format!("Failed to download and unpack sysroot asset '{asset_name}'"))?;
 
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         for entry in
@@ -312,6 +313,7 @@ pub(crate) fn download_binaryen(
     fs::remove_dir_all(target_dir.join(format!("binaryen-version_{}", version_str)))
         .with_context(|| "Failed to remove temporary binaryen directory")?;
 
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         eprintln!("Target dir: {}", target_dir.display());
