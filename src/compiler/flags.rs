@@ -238,10 +238,26 @@ fn lex_linker_args<'a>(
 // File extensions that mark a positional argument as a link-stage input
 // (object files and libraries) rather than a compiler source.
 fn is_linker_input(path: &str) -> bool {
-    matches!(
+    if matches!(
         Path::new(path).extension().and_then(|ext| ext.to_str()),
         Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
-    )
+    ) {
+        return true;
+    }
+    // `extension` only sees the final component, so a versioned shared library
+    // (libfoo.so.1.2.3, what cmake emits for a target carrying a SOVERSION)
+    // reports Some("3") and would be taken for a source: the driver then waits
+    // on a compiled <tmp>/libfoo.so.1.2.3.o that nothing produces, and the link
+    // dies with "cannot open".
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.split_once(".so."))
+        .is_some_and(|(_, version)| {
+            version
+                .split('.')
+                .all(|part| part.chars().all(|c| c.is_ascii_digit()))
+        })
 }
 
 /// Result of splitting a clang command line: compiler-side pieces plus the
@@ -508,6 +524,32 @@ mod tests {
     use super::*;
     use crate::UserSettings;
     use std::path::PathBuf;
+
+    #[test]
+    fn versioned_shared_libraries_are_linker_inputs() {
+        for path in [
+            "foo.o",
+            "foo.obj",
+            "libfoo.a",
+            "libfoo.so",
+            "foo.dll",
+            "libfoo.dylib",
+        ] {
+            assert!(is_linker_input(path), "{path} should link");
+        }
+        // cmake emits these for a target with SOVERSION
+        for path in [
+            "libarrow_python.so.2100.0.0.0",
+            "libfoo.so.1",
+            "libfoo.so.1.2.3",
+            "/abs/path/libfoo.so.17",
+        ] {
+            assert!(is_linker_input(path), "{path} should link");
+        }
+        for path in ["foo.c", "foo.cpp", "foo.so.beta", "foo.sox"] {
+            assert!(!is_linker_input(path), "{path} should compile");
+        }
+    }
 
     #[test]
     fn test_update_build_settings_from_arg() {
