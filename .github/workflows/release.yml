@@ -149,7 +149,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
-          cargo publish
+          cargo publish --registry crates-io
 
   release:
     name: Create Release
