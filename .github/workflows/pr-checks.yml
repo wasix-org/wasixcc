@@ -99,13 +99,15 @@ jobs:
       - name: Install wasmer
         uses: wasmerio/setup-wasmer@v3.1
 
-      - name: TEMP debug host linker
-        run: |
-          echo "--- which ---"; which cc gcc ld ld.lld lld || true
-          echo "--- cc version ---"; cc --version | head -2
-          echo "--- gcc-ld dir ---"
-          ls -l ~/.local/share/cargo-wasix/toolchains/*/rust/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ || true
-          echo "--- PATH ---"; echo "$PATH"
+      # The toolchain tarball ships the gcc-ld shims (ld.lld and friends)
+      # without the executable bit. rustc still points gcc at them with
+      # -fuse-ld=lld when it links *host* build scripts, so gcc skips them and
+      # gives up with "collect2: cannot find 'ld'" — unless the machine
+      # happens to have lld installed system-wide, which is why this doesn't
+      # reproduce on most dev boxes. Packaging bug in the wasix-org/rust
+      # release; fixing the mode in place is enough.
+      - name: Make the WASIX toolchain's lld shims executable
+        run: chmod -v +x ~/.local/share/cargo-wasix/toolchains/*/rust/lib/rustlib/*/bin/gcc-ld/*
 
       - name: Build the WASIX module
         run: make wasix-package
