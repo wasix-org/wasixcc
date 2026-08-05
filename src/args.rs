@@ -40,7 +40,7 @@ impl LlvmLocation {
                     tracing::warn!(
                         default_path = ?path.display(),
                         "No LLVM location specified and no LLVM installation found in \
-                        default path. Using system LLVM version 21. Output may be broken.\
+                        default path. Using system LLVM version 21. Output may be broken. \
                         {}",
                         LLVM_HINT
                     );
