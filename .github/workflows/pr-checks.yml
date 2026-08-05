@@ -87,6 +87,11 @@ jobs:
         uses: wasix-org/cargo-wasix@main
         with:
           version: 0.1.31
+        env:
+          # rust-toolchain.toml pins this repo to 1.90, but cargo-wasix's own
+          # dependencies need a newer rustc to compile. Build it with stable;
+          # the WASIX build itself uses the separate `wasix` toolchain anyway.
+          RUSTUP_TOOLCHAIN: stable
 
       # `cargo wasix test` runs the test module under a WASIX runtime.
       - name: Install wasmer
