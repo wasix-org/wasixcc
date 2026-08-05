@@ -286,6 +286,7 @@ WASIX:
 
 ```sh
 make wasix          # build the module (needs cargo-wasix)
+make wasix-test     # run the test suite as a WASIX module (needs wasmer)
 make wasix-update   # re-resolve and refresh Cargo.wasix.lock
 make wasix-package  # build and stage the module for `wasmer publish`
 ```

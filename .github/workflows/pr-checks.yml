@@ -74,6 +74,35 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  wasix-build:
+    name: Build and Test for WASIX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up cargo-wasix
+        uses: wasix-org/cargo-wasix@main
+        with:
+          version: 0.1.31
+
+      # `cargo wasix test` runs the test module under a WASIX runtime.
+      - name: Install wasmer
+        uses: wasmerio/setup-wasmer@v3.1
+
+      - name: Build the WASIX module
+        run: make wasix-package
+
+      - name: Run tests under WASIX
+        run: make wasix-test
+
+      # `make wasix` swaps Cargo.wasix.lock in and must put the crates.io
+      # Cargo.lock back; --locked means neither may drift either.
+      - name: Both lockfiles are unchanged
+        run: git diff --exit-code Cargo.lock Cargo.wasix.lock
+
   check-toolchain-changes:
     name: Check if toolchain tests should run
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@ WASIX_CONFIG := $(CURDIR)/wasix/registry.toml
 WASIX_OUT    := target/wasm32-wasmer-wasi/release
 LOCK_BACKUP  := .Cargo.lock.native.bak
 
-.PHONY: all build test fmt wasix wasix-update wasix-package guard-no-cargo-config
+.PHONY: all build test fmt wasix wasix-test wasix-update wasix-package guard-no-cargo-config
 
 all: build
 
@@ -28,23 +28,31 @@ guard-no-cargo-config:
 	  exit 1; \
 	fi
 
-# Build the wasm32-wasmer-wasi module against the overlay registry, resolved
-# from Cargo.wasix.lock. The crates.io Cargo.lock is put back afterwards, no
-# matter how the build ends. CARGO_WASIX_NO_REGISTRY_CONFIG stops cargo-wasix
-# from writing .cargo/config.toml behind our back.
+# Run a cargo-wasix subcommand against the overlay registry, resolved from
+# Cargo.wasix.lock, and put the crates.io Cargo.lock back afterwards no matter
+# how the command ends. CARGO_WASIX_NO_REGISTRY_CONFIG stops cargo-wasix from
+# writing .cargo/config.toml behind our back.
 #
-# Each recipe below is a single shell invocation on purpose: `trap` only
-# covers the shell it runs in, and .ONESHELL needs GNU Make 3.82+ (macOS
-# ships 3.81).
+# Each recipe below is a single shell invocation on purpose: `trap` only covers
+# the shell it runs in, and .ONESHELL needs GNU Make 3.82+ (macOS ships 3.81).
 #
 # TODO: collapse the lockfile dance into `--lockfile-path Cargo.wasix.lock`
 # once that flag is stable (unstable as of the pinned cargo 1.90).
+define with-wasix-lock
+cp Cargo.lock $(LOCK_BACKUP); \
+trap 'mv -f $(LOCK_BACKUP) Cargo.lock' EXIT INT TERM; \
+cp Cargo.wasix.lock Cargo.lock; \
+CARGO_WASIX_NO_REGISTRY_CONFIG=1 $(CARGO) wasix $(1) --locked \
+  --no-default-features --config "$(WASIX_CONFIG)"
+endef
+
+# Build the wasm32-wasmer-wasi module.
 wasix: guard-no-cargo-config
-	@cp Cargo.lock $(LOCK_BACKUP); \
-	 trap 'mv -f $(LOCK_BACKUP) Cargo.lock' EXIT INT TERM; \
-	 cp Cargo.wasix.lock Cargo.lock; \
-	 CARGO_WASIX_NO_REGISTRY_CONFIG=1 $(CARGO) wasix build --release --locked \
-	   --no-default-features --config "$(WASIX_CONFIG)"
+	@$(call with-wasix-lock,build --release)
+
+# Run the test suite as a WASIX module, under the wasmer runtime.
+wasix-test: guard-no-cargo-config
+	@$(call with-wasix-lock,test)
 
 # Re-resolve the WASIX dependency graph and refresh Cargo.wasix.lock.
 wasix-update: guard-no-cargo-config
