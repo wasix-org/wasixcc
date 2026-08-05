@@ -37,7 +37,7 @@ guard-no-cargo-config:
 # the shell it runs in, and .ONESHELL needs GNU Make 3.82+ (macOS ships 3.81).
 #
 # TODO: collapse the lockfile dance into `--lockfile-path Cargo.wasix.lock`
-# once that flag is stable (unstable as of the pinned cargo 1.90).
+# once that flag is stable (still nightly-only as of cargo 1.97).
 define with-wasix-lock
 cp Cargo.lock $(LOCK_BACKUP); \
 trap 'mv -f $(LOCK_BACKUP) Cargo.lock' EXIT INT TERM; \

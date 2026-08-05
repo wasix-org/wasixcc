@@ -88,14 +88,24 @@ jobs:
         with:
           version: 0.1.31
         env:
-          # rust-toolchain.toml pins this repo to 1.90, but cargo-wasix's own
-          # dependencies need a newer rustc to compile. Build it with stable;
-          # the WASIX build itself uses the separate `wasix` toolchain anyway.
+          # cargo-wasix is a tool, not part of this project's build, and its
+          # dependency tree tracks a recent rustc. Build it with stable rather
+          # than whatever rust-toolchain.toml pins us to, so the pin drifting
+          # behind stable can't break this job. The WASIX build itself uses
+          # the separate `wasix` toolchain anyway.
           RUSTUP_TOOLCHAIN: stable
 
       # `cargo wasix test` runs the test module under a WASIX runtime.
       - name: Install wasmer
         uses: wasmerio/setup-wasmer@v3.1
+
+      - name: TEMP debug host linker
+        run: |
+          echo "--- which ---"; which cc gcc ld ld.lld lld || true
+          echo "--- cc version ---"; cc --version | head -2
+          echo "--- gcc-ld dir ---"
+          ls -l ~/.local/share/cargo-wasix/toolchains/*/rust/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ || true
+          echo "--- PATH ---"; echo "$PATH"
 
       - name: Build the WASIX module
         run: make wasix-package
