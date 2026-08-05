@@ -1,6 +1,6 @@
 [package]
 name = "wasixcc"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/wasix-org/wasixcc"
@@ -17,37 +17,58 @@ pkg-fmt = "tgz"
 name = "wasixccenv"
 path = "src/main.rs"
 
+[features]
+default = ["download"]
+# The `wasixccenv download-*` and `aio-install` commands, which fetch the
+# sysroot, LLVM and binaryen over HTTPS. This drags in a full async networking
+# and TLS stack, all of which needs WASIX forks to link for
+# wasm32-wasmer-wasi — where the commands are useless anyway, since the
+# wasmer/wasixcc package gets clang and the sysroot from wasmer/clang.
+# Hence `make wasix` builds with --no-default-features.
+download = [
+    "dep:flate2",
+    "dep:fs_extra",
+    "dep:reqwest",
+    "dep:rustls",
+    "dep:rustls-native-certs",
+    "dep:serde",
+    "dep:tar",
+    "dep:webpki-roots",
+]
+
 [dependencies]
 anyhow = "1.0.98"
-regex = "1.11.1"
+clap = { version = "4.5.50", features = ["derive", "wrap_help"] }
+shell-words = "1.1.1"
 tempfile = "3.20.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
-# Required for the sysroot download
-flate2 = "1.1.2"
-tar = "0.4.44"
-serde = { version = "1.0.219", features = ["derive"] }
-
-# Pinned dependencies for WASIX builds
-getrandom = "0.3.3"
-reqwest = { version = "0.12.22", features = [
+# The download stack, see the `download` feature above.
+flate2 = { version = "1.1.2", optional = true }
+fs_extra = { version = "1.3.0", optional = true }
+serde = { version = "1.0.219", features = ["derive"], optional = true }
+tar = { version = "0.4.44", optional = true }
+# The `*-no-provider` TLS feature keeps reqwest from picking a crypto
+# provider: download.rs builds its own ClientConfig on top of ring and hands
+# it over with use_preconfigured_tls(). Letting reqwest (or rustls' default
+# features) select one pulls in aws-lc-rs, i.e. ~18 MB of C we never call.
+reqwest = { version = "0.12.22", default-features = false, features = [
     "blocking",
     "charset",
     "h2",
     "http2",
     "json",
-    "rustls-tls",
-], default-features = false }
-tower = "0.5.2"
-tower-layer = "0.3.3"
-tower-service = "0.3.3"
-fs_extra = "1.3.0"
-shell-words = "1.1.1"
-rustls-native-certs = "0.8.1"
-webpki-roots = "1.0.4"
-rustls = "0.23.35"
-clap = { version = "4.5.50", features = ["derive", "wrap_help"] }
+    "rustls-tls-manual-roots-no-provider",
+], optional = true }
+rustls = { version = "0.23.35", default-features = false, features = [
+    "logging",
+    "ring",
+    "std",
+    "tls12",
+], optional = true }
+rustls-native-certs = { version = "0.8.1", optional = true }
+webpki-roots = { version = "1.0.4", optional = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = [

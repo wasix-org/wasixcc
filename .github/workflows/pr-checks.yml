@@ -22,6 +22,46 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+  lockfile-hygiene:
+    name: Check Lockfile Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: No cargo config is tracked
+        run: |
+          tracked="$(git ls-files -- .cargo)"
+          if [ -n "$tracked" ]; then
+            echo "ERROR: tracked cargo config: $tracked"
+            echo "A .cargo/config.toml is auto-discovered by every cargo invocation, so"
+            echo "the WASIX overlay registry would apply to native builds too and rewrite"
+            echo "Cargo.lock with versions that don't exist on crates.io. The overlay"
+            echo "lives in wasix/registry.toml and is passed explicitly by 'make wasix'."
+            exit 1
+          fi
+
+      - name: Cargo.lock contains only crates.io versions
+        run: |
+          if grep -n '+wasix' Cargo.lock; then
+            echo "ERROR: Cargo.lock pins WASIX overlay forks. Those versions do not exist"
+            echo "on crates.io, so 'cargo install --locked wasixcc' and 'cargo vendor'"
+            echo "break for everyone downstream (issue #72). Regenerate with:"
+            echo "  rm -rf .cargo Cargo.lock && cargo generate-lockfile"
+            echo "The WASIX build has its own lockfile, Cargo.wasix.lock."
+            exit 1
+          fi
+
+      - name: Cargo.lock is in sync with Cargo.toml
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: WASIX build config still compiles
+        run: cargo check --locked --no-default-features
+
   rust-tests:
     name: Run Rust Unit Tests
     runs-on: ubuntu-latest

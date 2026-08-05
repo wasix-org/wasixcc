@@ -144,12 +144,25 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # The published .crate embeds Cargo.lock, so a lock pinning WASIX overlay
+      # forks makes 'cargo install --locked wasixcc' fail (issue #72).
+      - name: Refuse to publish a poisoned lockfile
+        run: |
+          if [ -e .cargo/config.toml ] || [ -e .cargo/config ]; then
+            echo "ERROR: a .cargo config is present; the WASIX overlay must not apply here"
+            exit 1
+          fi
+          if grep -n '+wasix' Cargo.lock; then
+            echo "ERROR: Cargo.lock pins WASIX overlay forks; refusing to publish"
+            exit 1
+          fi
+
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
-          cargo publish --registry crates-io
+          cargo publish --locked --registry crates-io
 
   release:
     name: Create Release

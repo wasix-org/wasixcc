@@ -1,3 +1,9 @@
 /.vscode
 /bin
 /target
+
+# The WASIX overlay registry must never be auto-discovered by cargo; it
+# applies to native builds too and poisons Cargo.lock. See wasix/registry.toml.
+/.cargo/
+# Scratch file used by the WASIX targets in the Makefile.
+/.Cargo.lock.native.bak

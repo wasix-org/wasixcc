@@ -6,6 +6,18 @@ use anyhow::{Context, Result, bail};
 
 use crate::compiler::{ModuleKind, WasmExceptionStyle};
 
+// Builds without the `download` feature (i.e. the WASIX build) have no
+// `wasixccenv download-*` commands to point at.
+#[cfg(feature = "download")]
+const LLVM_HINT: &str = "Use `wasixccenv download-llvm` to download a compatible version.";
+#[cfg(not(feature = "download"))]
+const LLVM_HINT: &str = "Use -sLLVM_LOCATION to point at a compatible installation.";
+
+#[cfg(feature = "download")]
+const BINARYEN_HINT: &str = "Use `wasixccenv download-binaryen` to download a compatible version.";
+#[cfg(not(feature = "download"))]
+const BINARYEN_HINT: &str = "Use -sBINARYEN_LOCATION to point at a compatible installation.";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlvmLocation {
     UserProvided(PathBuf),
@@ -29,7 +41,8 @@ impl LlvmLocation {
                         default_path = ?path.display(),
                         "No LLVM location specified and no LLVM installation found in \
                         default path. Using system LLVM version 21. Output may be broken.\
-                        Use `wasixccenv download-llvm` to download a compatible version."
+                        {}",
+                        LLVM_HINT
                     );
                     let tool_path = format!("{}-{}", tool, 21);
                     PathBuf::from(tool_path)
@@ -69,7 +82,8 @@ impl BinaryenLocation {
                         default_path = ?path.display(),
                         "No binaryen location specified and no binaryen installation found in \
                         default path. Using system binaryen. Output may be broken.\
-                        Use `wasixccenv download-binaryen` to download a compatible version."
+                        {}",
+                        BINARYEN_HINT
                     );
                     PathBuf::from(tool)
                 }
