@@ -8,6 +8,7 @@ use crate::args::{UserSettings, get_args_and_user_settings};
 
 mod args;
 mod compiler;
+#[cfg(feature = "download")]
 mod download;
 mod wasixccenv;
 

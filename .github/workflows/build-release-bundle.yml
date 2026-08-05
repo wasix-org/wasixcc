@@ -59,13 +59,13 @@ jobs:
         if: matrix.cross
         run: |
           TARGET=$(echo "${{ matrix.target }}" | sed 's/gnu/musl/g')
-          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target "$TARGET"
+          RUSTFLAGS="-C target-feature=+crt-static" cross build --release --locked --target "$TARGET"
           mv target/$TARGET tmp
           mv tmp target/${{ matrix.target }}
 
       - name: Build binary (cargo)
         if: "!matrix.cross"
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package binary
         shell: bash

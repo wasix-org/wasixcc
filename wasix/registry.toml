@@ -1,0 +1,24 @@
+# Cargo config for WASIX builds only, applied explicitly by the Makefile:
+#
+#     cargo wasix build --config <abs path to this file> ...
+#
+# It resolves the whole dependency graph through the WASIX overlay registry,
+# which serves `X.Y.Z+wasix.N` forks of the crates that need patching to link
+# for wasm32-wasmer-wasi (getrandom, tokio, mio, socket2, ring, ...) and
+# proxies everything else to crates.io.
+#
+# DO NOT copy this to .cargo/config.toml and DO NOT commit such a file. Cargo
+# would then apply it to every build, native ones included, and source
+# replacement records the *replaced* source id in Cargo.lock — so the lock
+# ends up pinning `+wasix.N` versions that claim to come from crates.io and
+# don't exist there. That breaks `cargo install --locked wasixcc` and
+# `cargo vendor` for everyone downstream; see issue #72.
+#
+# The WASIX build keeps its own resolution in Cargo.wasix.lock; `make wasix`
+# swaps that in and restores the crates.io Cargo.lock afterwards.
+
+[source.crates-io]
+replace-with = "wasix"
+
+[source.wasix]
+registry = "sparse+https://cargo-registry.wasix.org/"

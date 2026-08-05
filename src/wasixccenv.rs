@@ -7,10 +7,9 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::{
-    args::{UserSettings, gather_user_settings},
-    download::{self, TagSpec},
-};
+use crate::args::{UserSettings, gather_user_settings};
+#[cfg(feature = "download")]
+use crate::download::{self, TagSpec};
 
 #[cfg(unix)]
 const COMMANDS: &[&str] = &["cc", "++", "cc++", "ar", "nm", "ranlib", "ld"];
@@ -35,24 +34,28 @@ enum WasixccCommand {
     /// specified path
     InstallExecutables { path: PathBuf },
     /// Download the WASIX sysroot
+    #[cfg(feature = "download")]
     DownloadSysroot {
         /// The tag from which to download the sysroot, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         tag: Option<TagSpec>,
     },
     /// Download the custom LLVM toolchain (Unix only)
+    #[cfg(feature = "download")]
     DownloadLlvm {
         /// The tag from which to download the LLVM toolchain, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         tag: Option<TagSpec>,
     },
     /// Download binaryen (Unix only)
+    #[cfg(feature = "download")]
     DownloadBinaryen {
         /// The tag from which to download binaryen, either 'latest' or a
         /// specific tag starting with 'v'. Defaults to 'latest'.
         tag: Option<TagSpec>,
     },
     /// Download and install everything
+    #[cfg(feature = "download")]
     DownloadAll {
         #[arg(long)]
         /// The tag from which to download the sysroot, either 'latest' or a
@@ -67,6 +70,7 @@ enum WasixccCommand {
         /// specific tag starting with 'v'. Defaults to 'latest'.
         binaryen_tag: Option<TagSpec>,
     },
+    #[cfg(feature = "download")]
     AioInstall {
         #[arg(long)]
         /// The tag from which to download the sysroot, either 'latest' or a
@@ -97,15 +101,19 @@ pub(crate) fn run() -> Result<()> {
 
     match args.command {
         WasixccCommand::InstallExecutables { path } => install_executables(path),
+        #[cfg(feature = "download")]
         WasixccCommand::DownloadSysroot { tag } => {
             download_sysroot(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
+        #[cfg(feature = "download")]
         WasixccCommand::DownloadLlvm { tag } => {
             download_llvm(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
+        #[cfg(feature = "download")]
         WasixccCommand::DownloadBinaryen { tag } => {
             download_binaryen(tag.unwrap_or(TagSpec::Latest), &user_settings)
         }
+        #[cfg(feature = "download")]
         WasixccCommand::DownloadAll {
             binaryen_tag,
             llvm_tag,
@@ -116,6 +124,7 @@ pub(crate) fn run() -> Result<()> {
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             Ok(())
         }
+        #[cfg(feature = "download")]
         WasixccCommand::AioInstall {
             binaryen_tag,
             llvm_tag,
@@ -136,16 +145,19 @@ pub(crate) fn run() -> Result<()> {
     }
 }
 
+#[cfg(feature = "download")]
 pub fn download_sysroot(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading sysroot: {:?}", tag_spec);
     download::download_sysroot(tag_spec, user_settings)
 }
 
+#[cfg(feature = "download")]
 pub fn download_llvm(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading LLVM: {:?}", tag_spec);
     download::download_llvm(tag_spec, user_settings)
 }
 
+#[cfg(feature = "download")]
 pub fn download_binaryen(tag_spec: TagSpec, user_settings: &UserSettings) -> Result<()> {
     tracing::info!("Downloading binaryen: {:?}", tag_spec);
     download::download_binaryen(tag_spec, user_settings)

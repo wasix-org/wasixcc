@@ -269,3 +269,39 @@ cmake --build ...
 ## Contributing
 
 Contributions are welcome! Please feel free to open a PR if there's something you feel can be improved.
+
+### Building from source
+
+```sh
+make build          # cargo build --release --locked
+make test           # cargo test --locked
+make fmt            # cargo fmt --check
+```
+
+`wasixcc` is also published to the Wasmer registry as `wasmer/wasixcc`, a
+`wasm32-wasmer-wasi` module that runs inside Wasmer alongside `wasmer/clang`.
+That build resolves its dependencies through the WASIX overlay registry, which
+serves `X.Y.Z+wasix.N` forks of the crates that need patching to link for
+WASIX:
+
+```sh
+make wasix          # build the module (needs cargo-wasix)
+make wasix-test     # run the test suite as a WASIX module (needs wasmer)
+make wasix-update   # re-resolve and refresh Cargo.wasix.lock
+make wasix-package  # build and stage the module for `wasmer publish`
+```
+
+The overlay config lives in `wasix/registry.toml` and is passed explicitly with
+`cargo --config`. **Never place it at `.cargo/config.toml`, and never commit
+such a file.** Cargo auto-discovers that path for every invocation, so the
+overlay would apply to native builds too, and source replacement records the
+*replaced* source id — leaving `Cargo.lock` pinning `+wasix.N` versions that
+claim to come from crates.io and don't exist there. That breaks
+`cargo install --locked wasixcc` and `cargo vendor` for everyone downstream
+(see issue #72). `Cargo.lock` is the crates.io resolution; the WASIX build
+keeps its own in `Cargo.wasix.lock`, and `make wasix` swaps between them.
+
+The download stack (`wasixccenv download-*` / `aio-install`) sits behind the
+default-on `download` feature. The WASIX build turns it off — inside the
+Wasmer package, clang and the sysroot come from `wasmer/clang`, so there is
+nothing to download and no reason to link a TLS stack.

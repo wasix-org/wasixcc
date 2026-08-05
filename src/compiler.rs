@@ -1166,6 +1166,10 @@ mod tests {
         assert!(!script_content.contains("--net"));
     }
 
+    // Needs host executables on PATH, which a WASIX test module has no way to
+    // reach — and a failed spawn there aborts the process instead of returning
+    // an error, so this can't be turned into a negative test either.
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn test_run_command_success_and_failure() {
         // assume 'true' and 'false' are available on PATH
