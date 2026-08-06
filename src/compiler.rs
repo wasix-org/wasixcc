@@ -96,6 +96,7 @@ pub(crate) struct BuildSettings {
     opt_level: OptLevel,
     debug_level: DebugLevel,
     use_wasm_opt: bool,
+    openmp: bool,
 }
 
 /// A single user-supplied token destined for the link stage. Flags (`-Wl`,
@@ -266,6 +267,7 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
         opt_level: OptLevel::O0,
         debug_level: DebugLevel::G0,
         use_wasm_opt: user_settings.run_wasm_opt.unwrap_or(true),
+        openmp: false,
     };
 
     let state = State {
@@ -553,18 +555,28 @@ fn build_link_args(
         push("-lm");
         push("-lpthread");
         push("-lutil");
-
-        if state.cxx || state.user_settings.include_cpp_symbols {
-            push("-lc++");
-            push("-lc++abi");
-            if state.user_settings.wasm_exceptions.is_enabled() {
-                push("-lunwind");
-            }
-        }
     }
 
     if matches!(module_kind, ModuleKind::DynamicMain) {
         push("--no-whole-archive");
+    }
+
+    // -fopenmp is a compiler-driver flag and cannot be forwarded to wasm-ld.
+    // The caller supplies libomp's search path just like any other -L path.
+    if state.build_settings.openmp {
+        push("-lomp");
+    }
+
+    // The WASIX libomp archive references the C++ runtime. Shared modules do
+    // not otherwise receive it, and executables should receive only one copy.
+    if state.build_settings.openmp
+        || (module_kind.is_executable() && (state.cxx || state.user_settings.include_cpp_symbols))
+    {
+        push("-lc++");
+        push("-lc++abi");
+        if state.user_settings.wasm_exceptions.is_enabled() {
+            push("-lunwind");
+        }
     }
 
     // Link as much as needed out of libclang_rt.builtins regardless of module kind.
@@ -880,6 +892,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -907,6 +920,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -934,6 +948,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -962,6 +977,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -989,6 +1005,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1017,6 +1034,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1045,6 +1063,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1076,6 +1095,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1137,6 +1157,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1235,6 +1256,7 @@ mod tests {
                 opt_level: OptLevel::O0,
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: false,
+                openmp: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1258,6 +1280,23 @@ mod tests {
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect()
+    }
+
+    fn compiler_args_state(args: &[&str], cxx: bool) -> State {
+        let mut user_settings = UserSettings::default();
+        let (args, build_settings) = prepare_compiler_args(
+            args.iter().map(|arg| (*arg).to_owned()),
+            &mut user_settings,
+            cxx,
+        )
+        .unwrap();
+        State {
+            user_settings,
+            build_settings,
+            args,
+            cxx,
+            temp_dir: PathBuf::from("/tmp"),
+        }
     }
 
     #[test]
@@ -1293,6 +1332,54 @@ mod tests {
         assert!(
             user > nwa,
             "user -l must follow --no-whole-archive, got {args:?}"
+        );
+    }
+
+    #[test]
+    fn test_openmp_links_runtime_for_shared_module() {
+        let state = compiler_args_state(&["-fopenmp", "-shared", "ext.o", "-o", "out.wasm"], false);
+        assert!(state.build_settings.openmp);
+        let args = rendered_link_args(&state);
+
+        for library in ["-lomp", "-lc++", "-lc++abi", "-lunwind"] {
+            assert_eq!(
+                args.iter().filter(|arg| arg.as_str() == library).count(),
+                1,
+                "OpenMP should link {library} once, got {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_openmp_cxx_executable_does_not_duplicate_cpp_runtime() {
+        let mut state = link_args_state(
+            ModuleKind::StaticMain,
+            vec![LinkToken::Input(PathBuf::from("main.o"))],
+        );
+        state.build_settings.openmp = true;
+        state.cxx = true;
+        let args = rendered_link_args(&state);
+
+        for library in ["-lomp", "-lc++", "-lc++abi", "-lunwind"] {
+            assert_eq!(
+                args.iter().filter(|arg| arg.as_str() == library).count(),
+                1,
+                "OpenMP C++ executables should link {library} once, got {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_openmp_leaves_runtime_out() {
+        let state = link_args_state(
+            ModuleKind::SharedLibrary,
+            vec![LinkToken::Input(PathBuf::from("ext.o"))],
+        );
+        let args = rendered_link_args(&state);
+
+        assert!(
+            !args.iter().any(|arg| arg == "-lomp"),
+            "libomp must not be linked without OpenMP, got {args:?}"
         );
     }
 
