@@ -619,6 +619,13 @@ fn build_link_args(
     // still binds user objects to the sysroot -lc above.
     for token in &state.args.link_args {
         match token {
+            // -lstdc++/-lsupc++ are the GNU C++ runtime. We only have Clang's
+            // libc++. Auto-replace references to the GNU one and pull in
+            // Clang's instead, so consumers that hardcode GNU work automatically.
+            LinkToken::Flag(flag) if flag == "-lstdc++" || flag == "-lsupc++" => {
+                args.push(OsString::from("-lc++"));
+                args.push(OsString::from("-lc++abi"));
+            }
             LinkToken::Flag(flag) => args.push(OsString::from(flag)),
             LinkToken::Input(input) => args.push(input.clone().into_os_string()),
         }
@@ -1380,6 +1387,30 @@ mod tests {
         assert!(
             !args.iter().any(|arg| arg == "-lomp"),
             "libomp must not be linked without OpenMP, got {args:?}"
+        );
+    }
+
+    #[test]
+    fn test_user_lstdcxx_is_translated_to_libcxx() {
+        // The sysroot has no libstdc++. A build system that links a vendored C++
+        // dep itself passes the GNU name, and for a shared module wasixcc adds no
+        // C++ runtime of its own, so an untranslated -lstdc++ fails the link.
+        let state = link_args_state(
+            ModuleKind::SharedLibrary,
+            vec![
+                LinkToken::Input(PathBuf::from("ext.o")),
+                LinkToken::Flag("-lstdc++".to_string()),
+            ],
+        );
+        let args = rendered_link_args(&state);
+
+        assert!(
+            !args.iter().any(|a| a == "-lstdc++"),
+            "-lstdc++ must not reach wasm-ld, got {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "-lc++") && args.iter().any(|a| a == "-lc++abi"),
+            "-lstdc++ should become -lc++ -lc++abi, got {args:?}"
         );
     }
 
