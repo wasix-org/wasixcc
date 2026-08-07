@@ -187,6 +187,10 @@ jobs:
         with:
           files: |
             wasixcc-*.tar.gz
-          draft: true
+          # Must NOT be a draft: draft assets 404 for anonymous downloads, and
+          # the installer on wasix.cc pins this exact version (see WAX-605).
+          # Everything gating this job (version consistency, build, crates.io
+          # publish) has already passed by the time we get here.
+          draft: false
           prerelease: false
           generate_release_notes: true
