@@ -185,6 +185,10 @@ fn update_build_settings_from_compiler_flag(
             user_settings.wasm_exceptions = WasmExceptionStyle::Exnref
         }
         Flag::Simple("-fno-exceptions") => user_settings.wasm_exceptions = WasmExceptionStyle::Off,
+        // The link stage invokes wasm-ld directly, so remember the compiler
+        // driver's OpenMP runtime request and translate it in build_link_args.
+        Flag::Simple("-fopenmp" | "-fopenmp=libomp") => build_settings.openmp = true,
+        Flag::Simple("-fno-openmp") => build_settings.openmp = false,
         Flag::Simple("-fPIC") => user_settings.pic = true,
         Flag::Simple("-fno-PIC") => user_settings.pic = false,
         Flag::Simple("--wasm-opt") => build_settings.use_wasm_opt = true,
@@ -455,6 +459,7 @@ pub(super) fn prepare_compiler_args(
         opt_level: OptLevel::O0,
         debug_level: DebugLevel::G0,
         use_wasm_opt: true,
+        openmp: false,
     };
 
     let args = DEFAULT_WASM_CLANG_FLAGS
@@ -557,6 +562,7 @@ mod tests {
             opt_level: OptLevel::O0,
             debug_level: DebugLevel::G0,
             use_wasm_opt: true,
+            openmp: false,
         };
         let mut us = UserSettings::default();
         update_build_settings_from_compiler_flag(Flag::Simple("-O3"), &mut bs, &mut us);
@@ -572,6 +578,11 @@ mod tests {
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
         update_build_settings_from_compiler_flag(Flag::Simple("-fno-exceptions"), &mut bs, &mut us);
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Off);
+        assert!(!bs.openmp);
+        update_build_settings_from_compiler_flag(Flag::Simple("-fopenmp"), &mut bs, &mut us);
+        assert!(bs.openmp);
+        update_build_settings_from_compiler_flag(Flag::Simple("-fno-openmp"), &mut bs, &mut us);
+        assert!(!bs.openmp);
         us = UserSettings::default();
         update_build_settings_from_compiler_flag(
             Flag::Simple("-fwasm-exceptions"),
@@ -641,6 +652,42 @@ mod tests {
             vec![PathBuf::from("not_discarded.c"), PathBuf::from("in.c")]
         );
         assert!(pa.linker_inputs().is_empty());
+    }
+
+    #[test]
+    fn test_openmp_flags_flow_through_compiler_arg_processing() {
+        for enable_flag in ["-fopenmp", "-fopenmp=libomp"] {
+            let mut us = UserSettings::default();
+            let args = vec![enable_flag.to_string(), "input.o".to_string()];
+            let (prepared, settings) = prepare_compiler_args(args, &mut us, false).unwrap();
+
+            assert!(
+                settings.openmp,
+                "{enable_flag} should request the OpenMP runtime"
+            );
+            assert!(
+                prepared.compiler_args.iter().any(|arg| arg == enable_flag),
+                "{enable_flag} must still reach the compiler frontend"
+            );
+            assert_eq!(prepared.linker_inputs(), vec![PathBuf::from("input.o")]);
+        }
+
+        let mut us = UserSettings::default();
+        let (_, settings) = prepare_compiler_args(
+            ["-fopenmp", "-fno-openmp", "input.o"].map(str::to_string),
+            &mut us,
+            false,
+        )
+        .unwrap();
+        assert!(!settings.openmp, "the last OpenMP flag should win");
+
+        let (_, settings) = prepare_compiler_args(
+            ["-fno-openmp", "-fopenmp", "input.o"].map(str::to_string),
+            &mut us,
+            false,
+        )
+        .unwrap();
+        assert!(settings.openmp, "the last OpenMP flag should win");
     }
 
     #[test]
