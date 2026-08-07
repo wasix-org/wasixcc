@@ -102,21 +102,37 @@ download_wasixcc() {
 
     log "Fetching the latest wasixcc executable"
 
+    URL="https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz"
+    ARCHIVE="wasixcc-$TARGET.tar.gz"
+
     mkdir -p "$WASIXCC_DIR"
     cd "$WASIXCC_DIR"
+
+    # Download to a file rather than piping into tar. On an HTTP error the body
+    # ("Not Found") would otherwise be fed to tar, which reports the misleading
+    # "Unrecognized archive format" and buries the real cause (WAX-605).
+    rm -f "$ARCHIVE"
     if test -n "$CURL" ; then
         if test -n "$GITHUB_TOKEN" ; then
-            "$CURL" -H "authorization: Bearer $GITHUB_TOKEN" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
+            "$CURL" -fL -H "authorization: Bearer $GITHUB_TOKEN" "$URL" --output "$ARCHIVE" \
+                || fail "Failed to download $URL"
         else
-            "$CURL" -L "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" --output - | "$TAR" -xz
+            "$CURL" -fL "$URL" --output "$ARCHIVE" \
+                || fail "Failed to download $URL"
         fi
     else
         if test -n "$GITHUB_TOKEN" ; then
-            "$WGET" --header "authorization: Bearer $GITHUB_TOKEN" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
+            "$WGET" --header "authorization: Bearer $GITHUB_TOKEN" -q "$URL" -O "$ARCHIVE" \
+                || fail "Failed to download $URL"
         else
-            "$WGET" -q -c "https://github.com/wasix-org/wasixcc/releases/download/v$VERSION/wasixcc-$TARGET.tar.gz" -O - | "$TAR" -xz
+            "$WGET" -q "$URL" -O "$ARCHIVE" \
+                || fail "Failed to download $URL"
         fi
     fi
+
+    "$TAR" -xzf "$ARCHIVE" || fail "Failed to extract $ARCHIVE"
+    rm -f "$ARCHIVE"
+
     cd - > /dev/null 2>&1
 
     if test ! -f "$WASIXCC_EXECUTABLE" ; then

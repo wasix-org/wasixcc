@@ -1,19 +1,38 @@
 name: Deploy Website
 
 on:
+  # Website-only changes (landing page, server) ship as soon as they land.
+  # install.sh is deliberately excluded: it pins a release version, so
+  # deploying it on merge advertises a release that does not exist yet. It
+  # goes out via the workflow_run trigger below instead (WAX-605).
   push:
     branches:
       - main
     paths:
       - 'installer/**'
+      - '!installer/public/install.sh'
+  # A finished Release means the version install.sh pins is now downloadable.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   workflow_dispatch:
 
 jobs:
   deploy-website:
     runs-on: ubuntu-latest
+    # Only deploy for a release that actually succeeded. Release also runs on
+    # pull_request (version checks only, no publish), so ignore those.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # For a release, deploy the installer as of the tagged commit rather
+          # than whatever main has drifted to since.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
       - name: Setup Wasmer
         uses: wasmerio/setup-wasmer@v3.1
       - name: Publish website
