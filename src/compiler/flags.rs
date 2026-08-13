@@ -290,6 +290,9 @@ fn process_compiler_flags<'a>(
 
     for compiler_flag in flags {
         match compiler_flag {
+            Flag::Simple("-nodefaultlibs") => {
+                raw_link_tokens.push("-nodefaultlibs".to_owned());
+            }
             Flag::Simple(flag) | Flag::WithValue(flag, _, _)
                 if CLANG_FLAGS_TO_FORWARD_TO_WASM_LD.contains(flag) =>
             {

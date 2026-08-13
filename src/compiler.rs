@@ -479,6 +479,11 @@ fn build_link_args(
     sysroot_lib_wasm32_path: &Path,
 ) -> Result<Vec<OsString>> {
     let module_kind = state.user_settings.module_kind();
+    let no_default_libs = state
+        .args
+        .link_args
+        .iter()
+        .any(|token| matches!(token, LinkToken::Flag(flag) if flag == "-nodefaultlibs"));
     let mut args: Vec<OsString> = Vec::new();
 
     let mut push = |arg: &str| args.push(OsString::from(arg));
@@ -545,7 +550,7 @@ fn build_link_args(
 
     let mut push = |arg: &str| args.push(OsString::from(arg));
 
-    if module_kind.is_executable() {
+    if module_kind.is_executable() && !no_default_libs {
         push("-lwasi-emulated-getpid");
         push("-lwasi-emulated-mman");
         push("-lwasi-emulated-process-clocks");
@@ -619,6 +624,7 @@ fn build_link_args(
     // still binds user objects to the sysroot -lc above.
     for token in &state.args.link_args {
         match token {
+            LinkToken::Flag(flag) if flag == "-nodefaultlibs" => {}
             // -lstdc++/-lsupc++ are the GNU C++ runtime. We only have Clang's
             // libc++. Auto-replace references to the GNU one and pull in
             // Clang's instead, so consumers that hardcode GNU work automatically.
@@ -1412,6 +1418,28 @@ mod tests {
             args.iter().any(|a| a == "-lc++") && args.iter().any(|a| a == "-lc++abi"),
             "-lstdc++ should become -lc++ -lc++abi, got {args:?}"
         );
+    }
+
+    #[test]
+    fn test_nodefaultlibs_suppresses_injected_system_libraries() {
+        let state = link_args_state(
+            ModuleKind::DynamicMain,
+            vec![
+                LinkToken::Flag("-nodefaultlibs".to_string()),
+                LinkToken::Flag("--whole-archive".to_string()),
+                LinkToken::Flag("-lc".to_string()),
+                LinkToken::Flag("--no-whole-archive".to_string()),
+            ],
+        );
+        let args = rendered_link_args(&state);
+
+        assert!(!args.iter().any(|arg| arg == "-nodefaultlibs"));
+        assert_eq!(
+            args.iter().filter(|arg| *arg == "-lc").count(),
+            1,
+            "only the user-supplied libc should remain: {args:?}"
+        );
+        assert!(!args.iter().any(|arg| arg == "-lwasi-emulated-getpid"));
     }
 
     #[test]
