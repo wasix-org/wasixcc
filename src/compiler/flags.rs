@@ -163,6 +163,10 @@ static WASM_LD_FLAGS_TO_DISCARD: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     .into()
 });
 
+fn is_relocatable_flag(flag: &str) -> bool {
+    matches!(flag, "-r" | "--relocatable")
+}
+
 // Update the build settings based on a standalone compiler argument
 fn update_build_settings_from_compiler_flag(
     compiler_arg: Flag,
@@ -196,6 +200,7 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-c" | "-S" | "-E") => {
             user_settings.module_kind = Some(ModuleKind::ObjectFile);
         }
+        Flag::Simple(flag) if is_relocatable_flag(flag) => build_settings.relocatable = true,
         Flag::Simple("-shared") if user_settings.module_kind.is_none() => {
             user_settings.module_kind = Some(ModuleKind::SharedLibrary);
         }
@@ -297,6 +302,9 @@ fn process_compiler_flags<'a>(
             }
             Flag::Simple(flag) if flag.starts_with("-Wl,") => {
                 for split in flag["-Wl,".len()..].split(',') {
+                    if is_relocatable_flag(split) {
+                        build_settings.relocatable = true;
+                    }
                     raw_link_tokens.push(split.to_owned());
                 }
             }
@@ -311,6 +319,9 @@ fn process_compiler_flags<'a>(
                 tracing::debug!("Discarding flag '{}'", &compiler_flag);
             }
             Flag::WithValue("-Xlinker", value, _) => {
+                if is_relocatable_flag(value) {
+                    build_settings.relocatable = true;
+                }
                 raw_link_tokens.push(value.to_owned());
             }
             Flag::WithValue("-z", value, _) => {
@@ -460,6 +471,7 @@ pub(super) fn prepare_compiler_args(
         debug_level: DebugLevel::G0,
         use_wasm_opt: true,
         openmp: false,
+        relocatable: false,
     };
 
     let args = DEFAULT_WASM_CLANG_FLAGS
@@ -563,6 +575,7 @@ mod tests {
             debug_level: DebugLevel::G0,
             use_wasm_opt: true,
             openmp: false,
+            relocatable: false,
         };
         let mut us = UserSettings::default();
         update_build_settings_from_compiler_flag(Flag::Simple("-O3"), &mut bs, &mut us);
@@ -775,6 +788,30 @@ mod tests {
                 PathBuf::from("lib.o"),
             ]
         );
+    }
+
+    #[test]
+    fn test_forwarded_relocatable_flags_update_build_settings() {
+        for (args, expected_linker_flag) in [
+            (vec!["-Wl,-r", "input.o"], "-r"),
+            (vec!["-Wl,--relocatable", "input.o"], "--relocatable"),
+            (vec!["-Xlinker", "-r", "input.o"], "-r"),
+            (
+                vec!["-Xlinker", "--relocatable", "input.o"],
+                "--relocatable",
+            ),
+        ] {
+            let mut us = UserSettings::default();
+            let (prepared, settings) =
+                prepare_compiler_args(args.into_iter().map(str::to_owned), &mut us, false).unwrap();
+
+            assert!(
+                settings.relocatable,
+                "{expected_linker_flag} should select relocatable-link passthrough"
+            );
+            assert_eq!(prepared.linker_flags(), vec![expected_linker_flag]);
+            assert_eq!(prepared.linker_inputs(), vec![PathBuf::from("input.o")]);
+        }
     }
 
     #[test]
