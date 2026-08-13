@@ -484,6 +484,11 @@ fn build_link_args(
         .link_args
         .iter()
         .any(|token| matches!(token, LinkToken::Flag(flag) if flag == "-nodefaultlibs"));
+    let no_start_files = state
+        .args
+        .link_args
+        .iter()
+        .any(|token| matches!(token, LinkToken::Flag(flag) if flag == "-nostartfiles"));
     let mut args: Vec<OsString> = Vec::new();
 
     let mut push = |arg: &str| args.push(OsString::from(arg));
@@ -625,6 +630,7 @@ fn build_link_args(
     for token in &state.args.link_args {
         match token {
             LinkToken::Flag(flag) if flag == "-nodefaultlibs" => {}
+            LinkToken::Flag(flag) if flag == "-nostartfiles" => {}
             // -lstdc++/-lsupc++ are the GNU C++ runtime. We only have Clang's
             // libc++. Auto-replace references to the GNU one and pull in
             // Clang's instead, so consumers that hardcode GNU work automatically.
@@ -637,10 +643,12 @@ fn build_link_args(
         }
     }
 
-    if module_kind.is_executable() {
-        args.push(sysroot_lib_wasm32_path.join("crt1.o").into_os_string());
-    } else {
-        args.push(sysroot_lib_wasm32_path.join("scrt1.o").into_os_string());
+    if !no_start_files {
+        if module_kind.is_executable() {
+            args.push(sysroot_lib_wasm32_path.join("crt1.o").into_os_string());
+        } else {
+            args.push(sysroot_lib_wasm32_path.join("scrt1.o").into_os_string());
+        }
     }
 
     args.push(OsString::from("-o"));
@@ -1440,6 +1448,27 @@ mod tests {
             "only the user-supplied libc should remain: {args:?}"
         );
         assert!(!args.iter().any(|arg| arg == "-lwasi-emulated-getpid"));
+    }
+
+    #[test]
+    fn test_nostartfiles_suppresses_injected_crt() {
+        let state = link_args_state(
+            ModuleKind::DynamicMain,
+            vec![
+                LinkToken::Flag("-nostartfiles".to_string()),
+                LinkToken::Input(PathBuf::from("crt1-command.o")),
+            ],
+        );
+        let args = rendered_link_args(&state);
+
+        assert!(!args.iter().any(|arg| arg == "-nostartfiles"));
+        assert!(args.iter().any(|arg| arg == "crt1-command.o"));
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg == "/sysroot/lib/wasm32-wasi/crt1.o"),
+            "wasixcc must not add its crt when the caller supplied one: {args:?}"
+        );
     }
 
     #[test]
