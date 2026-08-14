@@ -97,6 +97,7 @@ pub(crate) struct BuildSettings {
     debug_level: DebugLevel,
     use_wasm_opt: bool,
     openmp: bool,
+    relocatable: bool,
 }
 
 /// A single user-supplied token destined for the link stage. Flags (`-Wl`,
@@ -181,9 +182,15 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
     tracing::debug!("Build settings: {build_settings:?}");
     tracing::debug!("Compiler/linker args: {args:?}");
 
-    if args.compiler_inputs.is_empty() && !args.has_linker_inputs() {
+    let relocatable = build_settings.relocatable;
+
+    if relocatable || (args.compiler_inputs.is_empty() && !args.has_linker_inputs()) {
         // If there are no inputs, just pass everything through to clang.
         // This lets us support invocations such as `wasixcc -dumpmachine`.
+        //
+        // A relocatable link (`-r`) goes the same way: it merges objects into
+        // one object, so none of the module setup below applies, as there is
+        // no crt, sysroot libs, entry point, or wasm-opt.
         let mut command = Command::new(user_settings.llvm_location.get_tool_path(if run_cxx {
             "clang++"
         } else {
@@ -196,6 +203,12 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
             let mut fuse_ld = OsString::from("-fuse-ld=");
             fuse_ld.push(user_settings.llvm_location.get_tool_path("wasm-ld"));
             command.arg(fuse_ld);
+        }
+        if relocatable {
+            // clang's wasm driver doesn't infer -nostdlib from -r, so it still
+            // adds crt1.o and the default libs and the merge fails on the
+            // undefined `main` they bring in.
+            command.arg("-nostdlib");
         }
         return run_command(command);
     }
@@ -268,6 +281,7 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
         debug_level: DebugLevel::G0,
         use_wasm_opt: user_settings.run_wasm_opt.unwrap_or(true),
         openmp: false,
+        relocatable: false,
     };
 
     let state = State {
@@ -914,6 +928,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -942,6 +957,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -970,6 +986,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -999,6 +1016,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1027,6 +1045,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1056,6 +1075,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1085,6 +1105,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1117,6 +1138,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1179,6 +1201,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: true,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
@@ -1278,6 +1301,7 @@ mod tests {
                 debug_level: DebugLevel::G0,
                 use_wasm_opt: false,
                 openmp: false,
+                relocatable: false,
             },
             args: PreparedArgs {
                 compiler_args: Vec::new(),
