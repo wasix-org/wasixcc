@@ -244,7 +244,13 @@ fn lex_linker_args<'a>(
 fn is_linker_input(path: &str) -> bool {
     if matches!(
         Path::new(path).extension().and_then(|ext| ext.to_str()),
-        Some("o") | Some("obj") | Some("a") | Some("so") | Some("dll") | Some("dylib")
+        Some("o")
+            | Some("obj")
+            | Some("a")
+            | Some("rlib")
+            | Some("so")
+            | Some("dll")
+            | Some("dylib")
     ) {
         return true;
     }
@@ -542,6 +548,7 @@ mod tests {
             "foo.o",
             "foo.obj",
             "libfoo.a",
+            "libfoo.rlib",
             "libfoo.so",
             "foo.dll",
             "libfoo.dylib",
