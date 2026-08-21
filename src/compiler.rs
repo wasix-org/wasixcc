@@ -616,7 +616,7 @@ fn build_link_args(
         ModuleKind::StaticMain => {
             // TODO: make configurable
             push("-z");
-            push("stack-size=8388608");
+            push("stack-size=10");
         }
 
         ModuleKind::DynamicMain => {
