@@ -513,7 +513,9 @@ fn build_link_args(
     push("--shared-memory");
     push("--max-memory=4294967296"); // TODO: make configurable
     push("--import-memory");
-    push("--export-dynamic");
+    if module_kind.requires_pic() {
+        push("--export-dynamic");
+    }
     push("--export=__wasm_call_ctors");
     // Do not demangle the function names (happens by default)
     push("--no-demangle");
@@ -1492,6 +1494,23 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "/sysroot/lib/wasm32-wasi/crt1.o"),
             "wasixcc must not add its crt when the caller supplied one: {args:?}"
+        );
+    }
+
+    #[test]
+    fn test_export_dynamic_is_limited_to_pic_modules() {
+        for kind in [ModuleKind::DynamicMain, ModuleKind::SharedLibrary] {
+            let args = rendered_link_args(&link_args_state(kind, Vec::new()));
+            assert!(
+                args.iter().any(|arg| arg == "--export-dynamic"),
+                "{kind:?} must export symbols for dynamic linking: {args:?}"
+            );
+        }
+
+        let args = rendered_link_args(&link_args_state(ModuleKind::StaticMain, Vec::new()));
+        assert!(
+            !args.iter().any(|arg| arg == "--export-dynamic"),
+            "StaticMain must not retain and export the whole symbol table: {args:?}"
         );
     }
 
