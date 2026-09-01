@@ -26,7 +26,6 @@ static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-simd",
     "--enable-relaxed-simd",
     "--enable-extended-const",
-    "--enable-wide-arithmetic",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
