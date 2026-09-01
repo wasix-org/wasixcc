@@ -65,12 +65,7 @@ static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-L", "-l"].into());
 
 // A set of non-default WA features supported by Cranelift/LLVM Wasmer compilers.
-static DEFAULT_WASM_CLANG_FLAGS: &[&str] = &[
-    "-msimd128",
-    "-mrelaxed-simd",
-    "-mextended-const",
-    "-mwide-arithmetic",
-];
+static DEFAULT_WASM_CLANG_FLAGS: &[&str] = &["-msimd128", "-mrelaxed-simd", "-mextended-const"];
 
 // We always specify values for these flags according to the build configuration, so
 // they must be discarded even if they're provided externally
@@ -665,7 +660,6 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
-                "-mwide-arithmetic".to_string(),
                 "-O2".to_string(),
             ]
         );
@@ -780,7 +774,6 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
-                "-mwide-arithmetic".to_string(),
                 "-O2".to_string(),
                 "-g0".to_string(),
             ]
@@ -919,6 +912,21 @@ mod tests {
     }
 
     #[test]
+    fn test_wide_arithmetic_is_not_enabled_by_default() {
+        // Not requested: the flag must not be injected on our own.
+        let mut us = UserSettings::default();
+        let (pa, _) = prepare_compiler_args(vec!["test.c".to_string()], &mut us, false).unwrap();
+        assert!(!pa.compiler_args.contains(&"-mwide-arithmetic".to_string()));
+
+        // Requested explicitly: passed through to clang untouched. wasm-opt needs no
+        // matching --enable-wide-arithmetic; it reads the feature off the module.
+        let mut us = UserSettings::default();
+        let args = vec!["-mwide-arithmetic".to_string(), "test.c".to_string()];
+        let (pa, _) = prepare_compiler_args(args, &mut us, false).unwrap();
+        assert!(pa.compiler_args.contains(&"-mwide-arithmetic".to_string()));
+    }
+
+    #[test]
     fn test_explicit_wasm_feature_flags_override_defaults() {
         let mut us = UserSettings::default();
         let args = vec![
@@ -936,7 +944,6 @@ mod tests {
                 "-msimd128".to_string(),
                 "-mrelaxed-simd".to_string(),
                 "-mextended-const".to_string(),
-                "-mwide-arithmetic".to_string(),
                 "-mno-simd128".to_string(),
                 "-mno-relaxed-simd".to_string(),
                 "-mno-extended-const".to_string(),
