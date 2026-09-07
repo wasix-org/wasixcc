@@ -595,10 +595,21 @@ fn build_link_args(
     if state.build_settings.openmp
         || (module_kind.is_executable() && (state.cxx || state.user_settings.include_cpp_symbols))
     {
+        // Side modules resolve the C++ runtime against the dynamic main, so it
+        // needs the whole archive rather than the subset its own objects
+        // reference; a lazy link leaves the rest unresolvable at dlopen.
+        let whole_archive_cxx_runtime = matches!(module_kind, ModuleKind::DynamicMain)
+            && (state.cxx || state.user_settings.include_cpp_symbols);
+        if whole_archive_cxx_runtime {
+            push("--whole-archive");
+        }
         push("-lc++");
         push("-lc++abi");
         if state.user_settings.wasm_exceptions.is_enabled() {
             push("-lunwind");
+        }
+        if whole_archive_cxx_runtime {
+            push("--no-whole-archive");
         }
     }
 
@@ -1492,6 +1503,36 @@ mod tests {
                 .any(|arg| arg == "/sysroot/lib/wasm32-wasi/crt1.o"),
             "wasixcc must not add its crt when the caller supplied one: {args:?}"
         );
+    }
+
+    #[test]
+    fn test_include_cpp_symbols_retains_the_whole_cxx_runtime() {
+        let whole_archived = |module_kind, lib| {
+            let mut state = link_args_state(module_kind, Vec::new());
+            state.user_settings.include_cpp_symbols = true;
+            let args = rendered_link_args(&state);
+            let mut whole = false;
+            for arg in &args {
+                match arg.as_str() {
+                    "--whole-archive" => whole = true,
+                    "--no-whole-archive" => whole = false,
+                    other if other == lib => return whole,
+                    _ => {}
+                }
+            }
+            panic!("{lib} missing from link args: {args:?}");
+        };
+
+        for lib in ["-lc++", "-lc++abi", "-lunwind"] {
+            assert!(
+                whole_archived(ModuleKind::DynamicMain, lib),
+                "a dynamic main must retain all of {lib} for its side modules to resolve"
+            );
+            assert!(
+                !whole_archived(ModuleKind::StaticMain, lib),
+                "a static main loads no side modules and takes only what it references"
+            );
+        }
     }
 
     #[test]
