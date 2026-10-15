@@ -204,11 +204,8 @@ jobs:
           echo "Successfully compiled test_main.c to test_main.wasm"
 
   # WASIX v2 needs the pinned wasix-org/llvm-project 22.x and libc2 releases,
-  # which are not published yet. The test also runs the programs with
-  # `wasmer run`, which needs a wasmer that runs wasixv2 modules (none
-  # released yet): add a step that puts one on PATH, or sets
-  # WASIXCC_TEST_WASIXV2_WASMER, before enabling this job. Set the repository
-  # variable WASIXV2_TOOLCHAIN_PUBLISHED to 'true' once all of them are.
+  # which are not published yet. Set the repository variable
+  # WASIXV2_TOOLCHAIN_PUBLISHED to 'true' once they are.
   toolchain-test-wasixv2:
     name: Toolchain Test (wasm32-wasixv2)
     if: vars.WASIXV2_TOOLCHAIN_PUBLISHED == 'true'
@@ -232,6 +229,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./target/release/wasixccenv aio-install ./target/release
 
-      # Compiles, links, inspects and runs a C program; see tests/wasixv2.rs.
+      # Compiles, links and inspects a C program; see tests/wasixv2.rs.
       - name: Test compilation
         run: cargo test -r --test wasixv2 -- --nocapture

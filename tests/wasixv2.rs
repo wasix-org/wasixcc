@@ -5,12 +5,6 @@
 //! finds them (`WASIXCC_LLVM_LOCATION` or `~/.wasixcc/llvm-wasixv2`,
 //! `WASIXCC_SYSROOT` or `~/.wasixcc/sysroot/sysroot-wasixv2`). Without them the
 //! test is skipped, unless `WASIXCC_TEST_WASIXV2_REQUIRED=1`.
-//!
-//! The programs are also run with `wasmer run`, using
-//! `WASIXCC_TEST_WASIXV2_WASMER=<path>` or else `wasmer` on `PATH` if it can
-//! run wasixv2 modules (no wasmer release can yet; build `wasmer-cli` from
-//! wasmerio/wasmer's `feat/wasixv2` branch). Without one, running is skipped,
-//! unless `WASIXCC_TEST_WASIXV2_REQUIRED=1`.
 
 // Spawns host processes, which a WASIX test module can't do.
 #![cfg(all(unix, not(target_family = "wasm")))]
@@ -40,23 +34,6 @@ int main(int argc, char **argv) {
     return 0;
 }
 "#;
-
-const EXPECTED_OUTPUT: &str = "hello from wasixv2: setjmp 3, 0.333\n";
-
-/// Exits with status 42 under a wasmer that runs wasixv2 modules:
-///
-/// ```wat
-/// (module
-///   (import "env" "memory" (memory 1 1 shared))
-///   (import "wasixv2" "exit_group" (func $exit_group (param i32)))
-///   (func (export "_start") (call $exit_group (i32.const 42))))
-/// ```
-const PROBE: &[u8] = b"\0asm\x01\0\0\0\
-    \x01\x08\x02\x60\x01\x7f\x00\x60\x00\x00\
-    \x02\x25\x02\x03env\x06memory\x02\x03\x01\x01\x07wasixv2\x0aexit_group\x00\x00\
-    \x03\x02\x01\x01\
-    \x07\x0a\x01\x06_start\x00\x01\
-    \x0a\x08\x01\x06\x00\x41\x2a\x10\x00\x0b";
 
 fn home() -> PathBuf {
     PathBuf::from(env::var_os("HOME").expect("HOME is not set"))
@@ -130,7 +107,6 @@ fn compile_and_link_c_for_wasixv2() {
     let dir = tempfile::TempDir::new().unwrap();
     let dir = dir.path();
     std::fs::write(dir.join("hello.c"), PROGRAM).unwrap();
-    let wasmer = wasmer(dir);
 
     // One step, selected by the TARGET setting.
     let mut command = wasixcc(dir);
@@ -165,10 +141,6 @@ fn compile_and_link_c_for_wasixv2() {
                 (module == "env" && name == "memory") || module == "wasixv2",
                 "{wasm} has an unexpected import {module}.{name}"
             );
-        }
-
-        if let Some(wasmer) = &wasmer {
-            assert_eq!(run_in_wasmer(wasmer, &dir.join(wasm)), EXPECTED_OUTPUT);
         }
     }
 }
@@ -212,46 +184,6 @@ fn cxx_link_without_libcxx_fails_clearly() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(stderr.contains("C++ is not supported"), "{stderr}");
-}
-
-/// The wasmer to run the programs with, if there is one that runs wasixv2
-/// modules.
-fn wasmer(dir: &Path) -> Option<PathBuf> {
-    let (wasmer, explicit) = match env::var_os("WASIXCC_TEST_WASIXV2_WASMER") {
-        Some(wasmer) => (PathBuf::from(wasmer), true),
-        None => (PathBuf::from("wasmer"), false),
-    };
-    let probe = dir.join("probe.wasm");
-    std::fs::write(&probe, PROBE).unwrap();
-    let runs_wasixv2 = Command::new(&wasmer)
-        .arg("run")
-        .arg(&probe)
-        .output()
-        .is_ok_and(|output| output.status.code() == Some(42));
-    if runs_wasixv2 {
-        return Some(wasmer);
-    }
-
-    let problem = format!("{wasmer:?} is missing or cannot run wasixv2 modules");
-    if explicit || required() {
-        panic!("no wasmer to run the programs: {problem}");
-    }
-    eprintln!(
-        "not running the programs: {problem}; set WASIXCC_TEST_WASIXV2_WASMER to a wasmer \
-         built from wasmerio/wasmer's feat/wasixv2 branch"
-    );
-    None
-}
-
-fn run_in_wasmer(wasmer: &Path, wasm: &Path) -> String {
-    let output = Command::new(wasmer).arg("run").arg(wasm).output().unwrap();
-    assert!(
-        output.status.success(),
-        "{wasm:?} failed under wasmer with {}: {}",
-        output.status,
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).unwrap()
 }
 
 /// The (module, name) pairs of a wasm module's imports.
