@@ -439,6 +439,15 @@ The following configuration options are available:
                            in errors if the flags are not supported.
                            Setting this option to `yes` will cause some known
                            unsupported flags and settings to be discarded.
+  PURE=<BOOL>              Pass the arguments of wasixcc, wasix++ and wasixld
+                           through to clang, clang++ and wasm-ld unchanged,
+                           adding no flags, sysroot or post-processing, and
+                           print their --version without the wasixcc banner.
+                           Only TARGET (including a --target=wasm32-wasixv2
+                           argument) and LLVM_LOCATION apply, to find the
+                           tools. For building the libc and other low-level
+                           code with the same toolchain wasixcc uses. wasixar,
+                           wasixranlib and wasixnm always pass through.
   AUTOCONF_WORKAROUNDS=<BOOL>
                            Attempt to detect autoconf tests and run workarounds
                            to make them behave as intended. conftests for functions

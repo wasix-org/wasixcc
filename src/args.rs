@@ -186,6 +186,7 @@ pub struct UserSettings {
     pub shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
     pub discard_unsupported_flags: bool,            // key name: DISCARD_UNSUPPORTED_FLAGS
     pub autoconf_workarounds: bool,                 // key name: AUTOCONF_WORKAROUNDS
+    pub pure: bool,                                 // key name: PURE
 }
 
 #[cfg(test)]
@@ -196,6 +197,21 @@ impl Default for UserSettings {
 }
 
 impl UserSettings {
+    /// Applies a `--target`/`-target` in `args` the way the compiler does: only the v2 triples
+    /// select a target. Used in PURE mode, which passes the arguments on unchanged.
+    pub fn apply_target_arg(&mut self, args: &[String]) {
+        let mut iter = args.iter();
+        while let Some(arg) = iter.next() {
+            let value = match arg.as_str() {
+                "--target" | "-target" => iter.next().map(String::as_str),
+                _ => arg.strip_prefix("--target="),
+            };
+            if let Some(target) = value.and_then(Target::from_target_arg) {
+                self.set_target(target);
+            }
+        }
+    }
+
     /// Switch to `target`, e.g. when the compiler is given `--target=wasm32-wasixv2`.
     /// A default LLVM location follows the target; a user-provided one is kept.
     pub fn set_target(&mut self, target: Target) {
@@ -450,6 +466,12 @@ pub fn gather_user_settings(
         None => false,
     };
 
+    let pure = match try_get_user_setting_value("PURE", args, envs)? {
+        Some(value) => read_bool_user_setting(&value)
+            .with_context(|| format!("Invalid value {value} for PURE"))?,
+        None => false,
+    };
+
     Ok(UserSettings {
         target,
         sysroot_location: sysroot_location.map(Into::into),
@@ -476,6 +498,7 @@ pub fn gather_user_settings(
         shell_script_wasmer_args,
         discard_unsupported_flags,
         autoconf_workarounds,
+        pure,
     })
 }
 
@@ -676,6 +699,30 @@ mod tests {
         assert_eq!(settings.target, Target::WasixV2);
         let settings = gather_user_settings(&["TARGET=wasm32-wasi".to_string()], &envs).unwrap();
         assert_eq!(settings.target, Target::Wasix);
+    }
+
+    #[test]
+    fn test_pure_setting_and_target_arg() {
+        let envs = HashMap::new();
+        assert!(!gather_user_settings(&[], &envs).unwrap().pure);
+        let mut envs = HashMap::new();
+        envs.insert("WASIXCC_PURE".to_string(), "yes".to_string());
+        let mut settings = gather_user_settings(&[], &envs).unwrap();
+        assert!(settings.pure);
+        assert!(gather_user_settings(&["PURE=maybe".to_string()], &envs).is_err());
+
+        // Only the v2 triples switch the target, in each spelling clang accepts.
+        settings.apply_target_arg(&["--target=wasm32-unknown-unknown".to_string()]);
+        assert_eq!(settings.target, Target::Wasix);
+        for args in [
+            vec!["--target=wasm32-wasixv2".to_string()],
+            vec!["-target".to_string(), "wasm32-unknown-wasixv2".to_string()],
+            vec!["--target".to_string(), "wasm32-wasixv2".to_string()],
+        ] {
+            let mut settings = gather_user_settings(&[], &envs).unwrap();
+            settings.apply_target_arg(&args);
+            assert_eq!(settings.target, Target::WasixV2, "{args:?}");
+        }
     }
 
     #[test]

@@ -131,6 +131,7 @@ summary is provided here for reference:
 | `SHELL_SCRIPT_WASMER_ARGS`      | Specify wasmer args for running the WASM binary in the shell script                            |
 | `DISCARD_UNSUPPORTED_FLAGS`     | Some flags that you would use with native tools don't work when targeting WASIX. Discard them. |
 | `AUTOCONF_WORKAROUNDS`          | Attempt to detect autoconf tests and make them work as intended.                               |
+| `PURE`                          | Pass arguments through to clang/clang++/wasm-ld unchanged; only `TARGET` and `LLVM_LOCATION` apply |
 
 ### Environment Variables
 
@@ -242,7 +243,15 @@ v2 downloads are pinned to the releases this version of `wasixcc` was tested
 with, rather than `latest`. Until those releases are published, point
 `wasixcc` at local builds with `-sLLVM_LOCATION=<llvm install dir>` and
 `-sSYSROOT=<dir>/sysroot-wasixv2` (built with libc2's
-`wasix2/build-sysroot.sh`).
+`make wasixv2-sysroot`).
+
+`PURE=yes` turns `wasixcc`, `wasix++` and `wasixld` into plain
+`clang`, `clang++` and `wasm-ld` from the LLVM that `TARGET` and
+`LLVM_LOCATION` select: arguments pass through unchanged, with no
+sysroot, extra flags or wasm-opt. libc2 builds itself this way, as
+`CC=wasixcc AR=wasixar RANLIB=wasixranlib` with
+`WASIXCC_TARGET=wasm32-wasixv2 WASIXCC_PURE=yes`, so that the libc and
+the programs built against it use the same toolchain.
 
 The resulting module imports its memory as `env.memory` and everything else
 from the `wasixv2` module. Exception handling (exnref) and `setjmp`/`longjmp`
