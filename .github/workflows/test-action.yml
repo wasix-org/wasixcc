@@ -163,3 +163,59 @@ jobs:
           EOF
           wasix++ hello.cpp -o hello_cpp.wasm
           ls -lh hello_cpp.wasm
+
+  # The action with target: wasm32-wasixv2. It needs the pinned
+  # wasix-org/llvm-project 22.x and libc2 releases, which are not published
+  # yet; set the repository variable WASIXV2_TOOLCHAIN_PUBLISHED to 'true'
+  # once they are (as for the toolchain-test-wasixv2 job in pr-checks.yml).
+  test-action-wasixv2:
+    needs: build-release-bundle
+    name: Test Action (wasm32-wasixv2) on ubuntu-24.04
+    if: vars.WASIXV2_TOOLCHAIN_PUBLISHED == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download bundle
+        id: download-bundle
+        run: |
+          BASE_DIR="$HOME"
+          VERSION="actions"
+          mkdir "$BASE_DIR/$VERSION"
+          cd "$BASE_DIR"
+          curl -f --retry 5 --retry-delay 10 --retry-all-errors \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -L -o release-bundle.zip \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/${{ needs.build-release-bundle.outputs.artifact-id }}/zip"
+          unzip release-bundle.zip
+          cd "$BASE_DIR/$VERSION"
+          tar xzf ../release-bundle.tar.gz
+          echo "release_base_url=file://$BASE_DIR" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - name: Setup wasixcc for wasm32-wasixv2
+        uses: ./
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release-base-url: ${{ steps.download-bundle.outputs.release_base_url }}
+          version: ${{ steps.download-bundle.outputs.version }}
+          target: wasm32-wasixv2
+
+      - name: Verify the v2 installation
+        run: |
+          test "$WASIXCC_TARGET" = wasm32-wasixv2
+          wasixccenv print-sysroot
+          test -f "$(wasixccenv print-sysroot)/lib/wasm32-wasixv2/libc.a"
+          test -x "$HOME/.wasixcc/llvm-wasixv2/bin/clang"
+
+      - name: Compile a C program
+        run: |
+          cat > hello.c << 'EOF2'
+          #include <stdio.h>
+          int main(void) {
+              printf("Hello from WASIX v2!\n");
+              return 0;
+          }
+          EOF2
+          wasixcc hello.c -o hello.wasm
+          ls -lh hello.wasm
