@@ -1459,6 +1459,7 @@ dependencies = [
  "flate2",
  "fs_extra",
  "reqwest",
+ "ring",
  "rustls",
  "rustls-native-certs",
  "serde",
