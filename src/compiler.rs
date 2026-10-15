@@ -250,7 +250,10 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
     if user_settings.target.is_v2() {
         check_v2_supported(&user_settings, &build_settings)?;
         ensure_v2_llvm(&user_settings)?;
-        if run_cxx {
+        // A C++ link needs libc++. Check before compiling, so the error is
+        // not a missing C++ header. Compile-only invocations (-c, -E) are
+        // left to clang: they may not need the C++ library at all.
+        if run_cxx && user_settings.module_kind().is_binary() {
             ensure_v2_libcxx(&user_settings.ensure_sysroot_location()?)?;
         }
     }
@@ -746,6 +749,14 @@ fn build_link_args_v2(
     // (-lpthread -lc and the builtins, plus the C++ runtime for C++) and link
     // the builtins from the sysroot instead. crt1 still comes from the driver.
     args.push(OsString::from("-nodefaultlibs"));
+
+    // An 8 MiB stack, as for v1 and the Linux main thread, instead of the
+    // driver's 1 MiB. It follows the driver's default and precedes the user's
+    // link tokens, so a user `-z stack-size=` still wins.
+    for flag in ["-z", "stack-size=8388608"] {
+        args.push(OsString::from("-Xlinker"));
+        args.push(OsString::from(flag));
+    }
 
     // The user's link tokens, in order. Flags go to wasm-ld verbatim through
     // -Xlinker, which (unlike -Wl,) never splits a flag at commas.
@@ -2201,6 +2212,10 @@ mod tests {
                 &sysroot_arg,
                 "-fuse-ld=/llvm/bin/wasm-ld",
                 "-nodefaultlibs",
+                "-Xlinker",
+                "-z",
+                "-Xlinker",
+                "stack-size=8388608",
                 "main.o",
                 "-Xlinker",
                 "--whole-archive",

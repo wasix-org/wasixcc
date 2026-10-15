@@ -248,8 +248,11 @@ The resulting module imports its memory as `env.memory` and everything else
 from the `wasixv2` module. Exception handling (exnref) and `setjmp`/`longjmp`
 are always enabled, including with `-fno-exceptions`.
 
+Programs get an 8 MiB stack, as with v1; override it with
+`-Wl,-z,stack-size=<bytes>`.
+
 v2 is C only for now. These fail with an error instead of producing broken
-output: C++ (until the sysroot ships libc++), `PIC`, dynamic linking
+output: linking C++ (until the sysroot ships libc++), `PIC`, dynamic linking
 (`-shared`, `-pie`, `MODULE_KIND=dynamic-main|shared-library`),
 `WASM_EXCEPTIONS=no|legacy`, `GENERATE_SHELL_SCRIPT` and `-fopenmp`.
 

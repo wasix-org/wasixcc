@@ -78,15 +78,19 @@ fn toolchain_available() -> bool {
     false
 }
 
-// wasixcc is the wasixccenv binary run under another name.
-fn wasixcc(dir: &Path) -> Command {
-    let link = dir.join("wasixcc");
+// wasixcc and wasix++ are the wasixccenv binary run under another name.
+fn tool(dir: &Path, name: &str) -> Command {
+    let link = dir.join(name);
     if !link.exists() {
         std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_wasixccenv"), &link).unwrap();
     }
     let mut command = Command::new(link);
     command.current_dir(dir);
     command
+}
+
+fn wasixcc(dir: &Path) -> Command {
+    tool(dir, "wasixcc")
 }
 
 fn run(mut command: Command) {
@@ -146,6 +150,47 @@ fn compile_and_link_c_for_wasixv2() {
             );
         }
     }
+}
+
+#[test]
+fn cxx_link_without_libcxx_fails_clearly() {
+    if !toolchain_available() {
+        return;
+    }
+    if sysroot_location()
+        .join("lib/wasm32-wasixv2/libc++.a")
+        .exists()
+    {
+        eprintln!("skipping: the sysroot has libc++");
+        return;
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let dir = dir.path();
+    std::fs::write(
+        dir.join("plain.cpp"),
+        "extern \"C\" int plain(int x) { return x + 1; }\n",
+    )
+    .unwrap();
+
+    // Compiling C++ that needs no C++ library is left to clang...
+    let mut command = tool(dir, "wasix++");
+    command.args([
+        "--target=wasm32-wasixv2",
+        "-c",
+        "plain.cpp",
+        "-o",
+        "plain.o",
+    ]);
+    run(command);
+
+    // ...but linking C++ needs libc++, which the sysroot does not have yet.
+    let mut command = tool(dir, "wasix++");
+    command.args(["--target=wasm32-wasixv2", "plain.cpp", "-o", "plain.wasm"]);
+    let output = command.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("C++ is not supported"), "{stderr}");
 }
 
 fn run_in_node(host: &Path, wasm: &Path) -> String {
