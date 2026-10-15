@@ -1,5 +1,5 @@
 use crate::{
-    args::UserSettings,
+    args::{LlvmLocation, Target, UserSettings},
     compiler::flags::{prepare_compiler_args, prepare_linker_args},
 };
 use anyhow::{Context, Result, bail};
@@ -27,6 +27,33 @@ static WASM_OPT_ENABLED_FEATURES: &[&str] = &[
     "--enable-relaxed-simd",
     "--enable-extended-const",
 ];
+
+// The wasm features the wasm32-wasixv2 driver enables by default (see the
+// fork's WebAssembly::initFeatureMap and the EH default), so wasm-opt accepts
+// everything clang emits for v2.
+static WASM_OPT_ENABLED_FEATURES_V2: &[&str] = &[
+    "--enable-threads",
+    "--enable-mutable-globals",
+    "--enable-bulk-memory",
+    "--enable-bulk-memory-opt",
+    "--enable-exception-handling",
+    "--enable-simd",
+    "--enable-relaxed-simd",
+    "--enable-extended-const",
+    "--enable-reference-types",
+    "--enable-multivalue",
+    "--enable-sign-ext",
+    "--enable-nontrapping-float-to-int",
+];
+
+// Where the v2 sysroot keeps crt and libraries. The driver searches only this
+// multiarch directory, not plain lib/.
+const V2_SYSROOT_LIB_DIR: &str = "lib/wasm32-wasixv2";
+
+// The compiler-rt builtins in the v2 sysroot. The fork's driver only looks for
+// compiler-rt in clang's resource directory, which the LLVM release leaves
+// empty, so wasixcc links this archive itself.
+const V2_BUILTINS_LIB: &str = "libclang_rt.builtins.a";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModuleKind {
@@ -197,7 +224,15 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
         }));
         let user_set_linker = original_args.iter().any(|a| a.starts_with("-fuse-ld"));
         command.args(original_args);
-        command.args([OsStr::new("--target=wasm32-wasi")]);
+        match user_settings.target {
+            Target::Wasix => {
+                command.args([OsStr::new("--target=wasm32-wasi")]);
+            }
+            Target::WasixV2 => {
+                ensure_v2_llvm(&user_settings)?;
+                command.args(v2_driver_args(&user_settings.sysroot_location()?));
+            }
+        }
         if !user_set_linker {
             let mut fuse_ld = OsString::from("-fuse-ld=");
             fuse_ld.push(user_settings.llvm_location.get_tool_path("wasm-ld"));
@@ -210,6 +245,11 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
             command.arg("-nostdlib");
         }
         return run_command(command);
+    }
+
+    if user_settings.target.is_v2() {
+        check_v2_supported(&user_settings, &build_settings)?;
+        ensure_v2_llvm(&user_settings)?;
     }
 
     let temp_dir = tempfile::TempDir::new().context("Failed to create temporary directory")?;
@@ -268,6 +308,10 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
     tracing::debug!("User settings: {user_settings:?}");
     tracing::debug!("Linker args: {args:?}");
 
+    if user_settings.target.is_v2() {
+        ensure_v2_llvm(&user_settings)?;
+    }
+
     if !args.has_linker_inputs() {
         // If there are no inputs, just pass everything through to wasm-ld.
         let mut command = Command::new(user_settings.llvm_location.get_tool_path("wasm-ld"));
@@ -282,6 +326,10 @@ pub(crate) fn link_only(args: Vec<String>, mut user_settings: UserSettings) -> R
         openmp: false,
         relocatable: false,
     };
+
+    if user_settings.target.is_v2() {
+        check_v2_supported(&user_settings, &build_settings)?;
+    }
 
     let state = State {
         user_settings,
@@ -361,6 +409,10 @@ fn shell_script_path(state: &State) -> Result<(PathBuf, OsString)> {
 // after the tool name, minus the input and -o). Kept separate from spawning so
 // it can be unit-tested.
 fn build_compile_args(state: &State, sysroot_path: &Path) -> Vec<OsString> {
+    if state.user_settings.target.is_v2() {
+        return build_compile_args_v2(state, sysroot_path);
+    }
+
     let mut command_args: Vec<&OsStr> = vec![
         OsStr::new("--sysroot"),
         sysroot_path.as_os_str(),
@@ -418,6 +470,142 @@ fn build_compile_args(state: &State, sysroot_path: &Path) -> Vec<OsString> {
     }
 
     command_args.into_iter().map(OsString::from).collect()
+}
+
+// v2 compiles lean on the wasm32-wasixv2 driver defaults: threads, TLS model,
+// wasm features and exnref EH with wasm SjLj all come from the target, so
+// wasixcc only names the target and the sysroot.
+fn build_compile_args_v2(state: &State, sysroot_path: &Path) -> Vec<OsString> {
+    let mut command_args = v2_driver_args(sysroot_path);
+    command_args.push(OsString::from("-c"));
+    command_args.extend(state.args.compiler_args.iter().map(OsString::from));
+
+    // -fno-exceptions turns the driver's whole EH default off, wasm SjLj
+    // included. setjmp is lowered by the compiler on v2 (libc2 has no
+    // callable setjmp), so any object calling it would then fail to link.
+    // Keep SjLj and exnref on while C++ exceptions stay off.
+    if v2_needs_sjlj_workaround(&state.args.compiler_args) {
+        for flag in [
+            "-mllvm",
+            "-wasm-enable-sjlj",
+            "-mllvm",
+            "-wasm-use-legacy-eh=false",
+        ] {
+            command_args.push(OsString::from(flag));
+        }
+    }
+
+    command_args
+}
+
+// Whether the compiler args turn off the v2 driver's EH default through
+// -fno-exceptions alone. Explicit wasm EH choices (-mllvm EH options,
+// disabling the features EH needs) are left to the user.
+fn v2_needs_sjlj_workaround(compiler_args: &[String]) -> bool {
+    let no_exceptions = compiler_args
+        .iter()
+        .rev()
+        .find_map(|arg| match arg.as_str() {
+            "-fno-exceptions" => Some(true),
+            "-fexceptions" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false);
+    if !no_exceptions {
+        return false;
+    }
+
+    let explicit_eh_choice = compiler_args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-mno-exception-handling"
+                | "-mno-multivalue"
+                | "-mno-reference-types"
+                | "-fsjlj-exceptions"
+                | "-fseh-exceptions"
+                | "-fdwarf-exceptions"
+        ) || {
+            let option = arg.trim_start_matches('-');
+            [
+                "wasm-enable-eh",
+                "wasm-enable-sjlj",
+                "wasm-use-legacy-eh",
+                "enable-emscripten-",
+            ]
+            .iter()
+            .any(|prefix| option.starts_with(prefix))
+        }
+    });
+
+    !explicit_eh_choice
+}
+
+// Driver arguments for every v2 clang invocation. The fork's LLVM release
+// ships a default config (bin/wasm32-unknown-wasixv2.cfg) whose --sysroot
+// points at the v1 exnref sysroot, so skip the config and always name the v2
+// sysroot explicitly.
+fn v2_driver_args(sysroot_path: &Path) -> Vec<OsString> {
+    let mut sysroot_arg = OsString::from("--sysroot=");
+    sysroot_arg.push(sysroot_path);
+    vec![
+        OsString::from(format!("--target={}", Target::WasixV2.triple())),
+        OsString::from("--no-default-config"),
+        sysroot_arg,
+    ]
+}
+
+// v2 needs the 22.x LLVM fork. Unlike v1 there is no system LLVM to fall back
+// to, so point at the fix instead of failing on a missing executable.
+fn ensure_v2_llvm(user_settings: &UserSettings) -> Result<()> {
+    if let LlvmLocation::DefaultPath(path) = &user_settings.llvm_location
+        && !path.join("bin").exists()
+    {
+        bail!(
+            "No LLVM toolchain for wasm32-wasixv2 found at {}. Download it with \
+            `wasixccenv -sTARGET=wasm32-wasixv2 download-llvm`, or point \
+            -sLLVM_LOCATION at an installation of the wasix-org/llvm-project \
+            22.x fork.",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+// Reject the v1 features v2 does not support yet, instead of producing
+// broken output.
+fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettings) -> Result<()> {
+    const TARGET: &str = "wasm32-wasixv2";
+
+    match user_settings.wasm_exceptions {
+        WasmExceptionStyle::Exnref => {}
+        WasmExceptionStyle::Off | WasmExceptionStyle::Legacy => bail!(
+            "WASM_EXCEPTIONS={} is not supported for {TARGET}: it always uses exnref \
+            exception handling, which setjmp/longjmp are built on",
+            if user_settings.wasm_exceptions.is_legacy() {
+                "legacy"
+            } else {
+                "no"
+            }
+        ),
+    }
+    if user_settings.pic {
+        bail!("PIC is not supported for {TARGET} yet");
+    }
+    if let kind @ (ModuleKind::DynamicMain | ModuleKind::SharedLibrary) =
+        user_settings.module_kind()
+    {
+        bail!(
+            "Dynamic linking is not supported for {TARGET} yet (module kind {kind:?}, \
+            from -shared, -pie or MODULE_KIND)"
+        );
+    }
+    if user_settings.generate_shell_script {
+        bail!("GENERATE_SHELL_SCRIPT is not supported for {TARGET} yet");
+    }
+    if build_settings.openmp {
+        bail!("OpenMP (-fopenmp) is not supported for {TARGET} yet");
+    }
+    Ok(())
 }
 
 fn compile_inputs(state: &mut State) -> Result<()> {
@@ -479,6 +667,10 @@ fn compile_inputs(state: &mut State) -> Result<()> {
 }
 
 fn link_inputs(state: &State) -> Result<()> {
+    if state.user_settings.target.is_v2() {
+        return link_inputs_v2(state);
+    }
+
     let linker_path = state.user_settings.llvm_location.get_tool_path("wasm-ld");
 
     let sysroot_path = state.user_settings.ensure_sysroot_location()?;
@@ -491,6 +683,104 @@ fn link_inputs(state: &State) -> Result<()> {
     command.args(args);
 
     run_command(command)
+}
+
+// v2 links through the clang driver, which knows the wasm32-wasixv2 link
+// contract (crt1, shared imported memory, exports, stack size, EH options for
+// LTO). wasixcc only adds the default libraries, see build_link_args_v2.
+fn link_inputs_v2(state: &State) -> Result<()> {
+    let driver_path = state.user_settings.llvm_location.get_tool_path("clang");
+    let linker_path = state.user_settings.llvm_location.get_tool_path("wasm-ld");
+    let sysroot_path = state.user_settings.ensure_sysroot_location()?;
+
+    let args = build_link_args_v2(state, &sysroot_path, &linker_path)?;
+
+    let mut command = Command::new(driver_path);
+    command.args(args);
+
+    run_command(command)
+}
+
+// Assemble the clang driver arguments for a v2 link (everything after the tool
+// name). Kept separate from spawning so it can be unit-tested; it only touches
+// the filesystem to check the sysroot has the libraries it links.
+fn build_link_args_v2(
+    state: &State,
+    sysroot_path: &Path,
+    linker_path: &Path,
+) -> Result<Vec<OsString>> {
+    let link_args = &state.args.link_args;
+    let no_default_libs = link_args
+        .iter()
+        .any(|token| matches!(token, LinkToken::Flag(flag) if flag == "-nodefaultlibs"));
+
+    let mut args = v2_driver_args(sysroot_path);
+
+    let mut fuse_ld = OsString::from("-fuse-ld=");
+    fuse_ld.push(linker_path);
+    args.push(fuse_ld);
+
+    // The driver would link compiler-rt from clang's resource directory,
+    // where the LLVM release has none. Take over the default libraries
+    // (-lpthread -lc and the builtins, plus the C++ runtime for C++) and link
+    // the builtins from the sysroot instead. crt1 still comes from the driver.
+    args.push(OsString::from("-nodefaultlibs"));
+
+    // The user's link tokens, in order. Flags go to wasm-ld verbatim through
+    // -Xlinker, which (unlike -Wl,) never splits a flag at commas.
+    for token in link_args {
+        match token {
+            LinkToken::Flag(flag) if flag == "-nodefaultlibs" => {}
+            LinkToken::Flag(flag) if flag == "-nostartfiles" => {
+                args.push(OsString::from("-nostartfiles"))
+            }
+            // See build_link_args: the GNU C++ runtime maps to libc++.
+            LinkToken::Flag(flag) if flag == "-lstdc++" || flag == "-lsupc++" => {
+                args.push(OsString::from("-lc++"));
+                args.push(OsString::from("-lc++abi"));
+            }
+            LinkToken::Flag(flag) => {
+                args.push(OsString::from("-Xlinker"));
+                args.push(OsString::from(flag));
+            }
+            LinkToken::Input(input) => args.push(input.clone().into_os_string()),
+        }
+    }
+
+    if !no_default_libs {
+        let lib_dir = sysroot_path.join(V2_SYSROOT_LIB_DIR);
+
+        // The same order the driver uses: C++ runtime, -lpthread -lc, builtins.
+        if state.cxx || state.user_settings.include_cpp_symbols {
+            if !lib_dir.join("libc++.a").exists() {
+                bail!(
+                    "C++ is not supported for wasm32-wasixv2 yet: the sysroot at {} \
+                    has no libc++ ({V2_SYSROOT_LIB_DIR}/libc++.a)",
+                    sysroot_path.display()
+                );
+            }
+            args.push(OsString::from("-lc++"));
+            args.push(OsString::from("-lc++abi"));
+        }
+
+        args.push(OsString::from("-lpthread"));
+        args.push(OsString::from("-lc"));
+
+        let builtins = lib_dir.join(V2_BUILTINS_LIB);
+        if !builtins.exists() {
+            bail!(
+                "The wasm32-wasixv2 sysroot at {} has no compiler-rt builtins \
+                ({V2_SYSROOT_LIB_DIR}/{V2_BUILTINS_LIB})",
+                sysroot_path.display()
+            );
+        }
+        args.push(builtins.into_os_string());
+    }
+
+    args.push(OsString::from("-o"));
+    args.push(output_path(state)?.into_os_string());
+
+    Ok(args)
 }
 
 // Assemble the full wasm-ld argument vector (everything after the tool name).
@@ -690,7 +980,9 @@ fn build_link_args(
     Ok(args)
 }
 
-fn run_wasm_opt(state: &State) -> Result<()> {
+// Build the wasm-opt command, up to (excluding) the input file. None if there
+// is nothing for wasm-opt to do.
+fn build_wasm_opt_command(state: &State) -> Option<Command> {
     let mut command = Command::new(
         state
             .user_settings
@@ -699,16 +991,20 @@ fn run_wasm_opt(state: &State) -> Result<()> {
     );
 
     if !state.user_settings.wasm_opt_suppress_default {
-        match state.user_settings.wasm_exceptions {
-            WasmExceptionStyle::Exnref => {
-                // No conversion to exnref needed
-            }
-            WasmExceptionStyle::Legacy => {
-                // Convert old eh to new exnref
-                command.arg("--emit-exnref");
-            }
-            WasmExceptionStyle::Off => {
-                command.arg("--asyncify");
+        // v2 modules always use exnref EH and need neither conversion nor
+        // asyncify.
+        if !state.user_settings.target.is_v2() {
+            match state.user_settings.wasm_exceptions {
+                WasmExceptionStyle::Exnref => {
+                    // No conversion to exnref needed
+                }
+                WasmExceptionStyle::Legacy => {
+                    // Convert old eh to new exnref
+                    command.arg("--emit-exnref");
+                }
+                WasmExceptionStyle::Off => {
+                    command.arg("--asyncify");
+                }
             }
         }
 
@@ -745,10 +1041,8 @@ fn run_wasm_opt(state: &State) -> Result<()> {
 
     command.args(&state.user_settings.wasm_opt_flags);
 
-    if command.get_args().next().is_none() {
-        tracing::info!("Skipping wasm-opt as no passes were specified or needed");
-        return Ok(());
-    }
+    // Nothing to do without any passes.
+    command.get_args().next()?;
 
     match state.build_settings.debug_level {
         DebugLevel::G0 => (),
@@ -759,7 +1053,19 @@ fn run_wasm_opt(state: &State) -> Result<()> {
 
     command.arg("--no-validation");
 
-    command.args(WASM_OPT_ENABLED_FEATURES);
+    command.args(match state.user_settings.target {
+        Target::Wasix => WASM_OPT_ENABLED_FEATURES,
+        Target::WasixV2 => WASM_OPT_ENABLED_FEATURES_V2,
+    });
+
+    Some(command)
+}
+
+fn run_wasm_opt(state: &State) -> Result<()> {
+    let Some(mut command) = build_wasm_opt_command(state) else {
+        tracing::info!("Skipping wasm-opt as no passes were specified or needed");
+        return Ok(());
+    };
 
     let output_path = output_path(state)?;
 
@@ -1704,5 +2010,355 @@ mod tests {
                 "out.wasm",
             ]
         );
+    }
+
+    fn v2_settings() -> UserSettings {
+        let mut user_settings = UserSettings::default();
+        user_settings.set_target(Target::WasixV2);
+        user_settings
+    }
+
+    fn compiler_args_state_v2(args: &[&str], cxx: bool) -> State {
+        let mut user_settings = v2_settings();
+        let (args, build_settings) = prepare_compiler_args(
+            args.iter().map(|arg| (*arg).to_owned()),
+            &mut user_settings,
+            cxx,
+        )
+        .unwrap();
+        State {
+            user_settings,
+            build_settings,
+            args,
+            cxx,
+            temp_dir: PathBuf::from("/tmp"),
+        }
+    }
+
+    // A v2 sysroot with just the libraries the link step checks for.
+    fn fake_v2_sysroot(with_cxx: bool) -> TempDir {
+        let sysroot = TempDir::new().unwrap();
+        let lib_dir = sysroot.path().join(V2_SYSROOT_LIB_DIR);
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::write(lib_dir.join(V2_BUILTINS_LIB), "").unwrap();
+        if with_cxx {
+            fs::write(lib_dir.join("libc++.a"), "").unwrap();
+        }
+        sysroot
+    }
+
+    fn rendered_link_args_v2(state: &State, sysroot: &Path) -> Result<Vec<String>> {
+        Ok(
+            build_link_args_v2(state, sysroot, Path::new("/llvm/bin/wasm-ld"))?
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn test_v2_compile_args() {
+        let state = compiler_args_state_v2(&["-O2", "-g", "-DFOO=1", "in.c", "-o", "out"], false);
+        assert_eq!(
+            rendered_compile_args(&state),
+            [
+                "--target=wasm32-wasixv2",
+                "--no-default-config",
+                "--sysroot=/sysroot",
+                "-c",
+                "-O2",
+                "-g",
+                "-DFOO=1",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_v2_compile_args_from_target_flag() {
+        let mut user_settings = UserSettings::default();
+        let (args, build_settings) = prepare_compiler_args(
+            ["--target=wasm32-wasixv2", "-Wall", "in.c"].map(str::to_owned),
+            &mut user_settings,
+            false,
+        )
+        .unwrap();
+        let state = State {
+            user_settings,
+            build_settings,
+            args,
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+        assert_eq!(
+            rendered_compile_args(&state),
+            [
+                "--target=wasm32-wasixv2",
+                "--no-default-config",
+                "--sysroot=/sysroot",
+                "-c",
+                "-Wall",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_v2_no_exceptions_keeps_sjlj() {
+        let sjlj = [
+            "-mllvm",
+            "-wasm-enable-sjlj",
+            "-mllvm",
+            "-wasm-use-legacy-eh=false",
+        ];
+        let has_sjlj = |args: &[&str]| {
+            let rendered = rendered_compile_args(&compiler_args_state_v2(args, true));
+            rendered.windows(sjlj.len()).any(|window| window == sjlj)
+        };
+
+        assert!(has_sjlj(&["-fno-exceptions", "in.cpp"]));
+        assert!(has_sjlj(&["-fexceptions", "-fno-exceptions", "in.cpp"]));
+        // The driver default already covers these.
+        assert!(!has_sjlj(&["in.cpp"]));
+        assert!(!has_sjlj(&["-fno-exceptions", "-fexceptions", "in.cpp"]));
+        // -fwasm-exceptions is discarded, so the driver default applies.
+        assert!(!has_sjlj(&["-fwasm-exceptions", "in.cpp"]));
+        // Explicit wasm EH choices are the user's.
+        assert!(!has_sjlj(&[
+            "-fno-exceptions",
+            "-mno-exception-handling",
+            "in.cpp"
+        ]));
+        assert!(!has_sjlj(&[
+            "-fno-exceptions",
+            "-mllvm",
+            "--wasm-enable-sjlj",
+            "in.cpp"
+        ]));
+    }
+
+    #[test]
+    fn test_v2_link_args() {
+        let sysroot = fake_v2_sysroot(false);
+        let mut user_settings = v2_settings();
+        let args = prepare_linker_args(
+            [
+                "main.o",
+                "--whole-archive",
+                "libfoo.a",
+                "--no-whole-archive",
+                "-L/libs",
+                "-lbar",
+                "-z",
+                "stack-size=65536",
+                "--export=a,b",
+                "-o",
+                "out.wasm",
+            ]
+            .map(str::to_owned),
+            &mut user_settings,
+        )
+        .unwrap();
+        let state = State {
+            user_settings,
+            build_settings: BuildSettings {
+                opt_level: OptLevel::O0,
+                debug_level: DebugLevel::G0,
+                use_wasm_opt: false,
+                openmp: false,
+                relocatable: false,
+            },
+            args,
+            cxx: false,
+            temp_dir: PathBuf::from("/tmp"),
+        };
+
+        let sysroot_arg = format!("--sysroot={}", sysroot.path().display());
+        let builtins = sysroot
+            .path()
+            .join(V2_SYSROOT_LIB_DIR)
+            .join(V2_BUILTINS_LIB)
+            .display()
+            .to_string();
+        assert_eq!(
+            rendered_link_args_v2(&state, sysroot.path()).unwrap(),
+            [
+                "--target=wasm32-wasixv2",
+                "--no-default-config",
+                &sysroot_arg,
+                "-fuse-ld=/llvm/bin/wasm-ld",
+                "-nodefaultlibs",
+                "main.o",
+                "-Xlinker",
+                "--whole-archive",
+                "libfoo.a",
+                "-Xlinker",
+                "--no-whole-archive",
+                "-Xlinker",
+                "-L/libs",
+                "-Xlinker",
+                "-lbar",
+                "-Xlinker",
+                "-z",
+                "-Xlinker",
+                "stack-size=65536",
+                "-Xlinker",
+                "--export=a,b",
+                "-lpthread",
+                "-lc",
+                &builtins,
+                "-o",
+                "out.wasm",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_v2_link_args_from_compiler_driver_flags() {
+        let sysroot = fake_v2_sysroot(false);
+        let mut state = compiler_args_state_v2(
+            &[
+                "-Wl,--whole-archive,libfoo.a,--no-whole-archive",
+                "-nostartfiles",
+                "-lstdc++",
+                "in.c",
+            ],
+            false,
+        );
+        state
+            .args
+            .link_args
+            .push(LinkToken::Input(PathBuf::from("/tmp/in.c.0.o")));
+        let args = rendered_link_args_v2(&state, sysroot.path()).unwrap();
+
+        let wa = args.iter().position(|a| a == "--whole-archive").unwrap();
+        assert_eq!(
+            &args[wa..wa + 4],
+            [
+                "--whole-archive",
+                "libfoo.a",
+                "-Xlinker",
+                "--no-whole-archive"
+            ]
+        );
+        assert!(args.iter().any(|a| a == "-nostartfiles"));
+        assert!(!args.iter().any(|a| a == "-lstdc++"));
+        assert!(args.iter().any(|a| a == "-lc++"));
+        // Compiled objects follow the user's link tokens; the default
+        // libraries come last.
+        let obj = args.iter().position(|a| a == "/tmp/in.c.0.o").unwrap();
+        let libc = args.iter().position(|a| a == "-lc").unwrap();
+        assert!(wa < obj && obj < libc, "{args:?}");
+        assert_eq!(args[args.len() - 2], "-o");
+        assert_eq!(args[args.len() - 1], "a.out");
+    }
+
+    #[test]
+    fn test_v2_nodefaultlibs_leaves_libraries_to_the_user() {
+        // No builtins in this sysroot: they are not needed either.
+        let sysroot = TempDir::new().unwrap();
+        let state = compiler_args_state_v2(&["-nodefaultlibs", "main.o", "-lc"], false);
+        let args = rendered_link_args_v2(&state, sysroot.path()).unwrap();
+        assert_eq!(args.iter().filter(|a| *a == "-nodefaultlibs").count(), 1);
+        assert!(!args.iter().any(|a| a == "-lpthread"));
+        assert!(!args.iter().any(|a| a.ends_with(V2_BUILTINS_LIB)));
+    }
+
+    #[test]
+    fn test_v2_link_requires_builtins_and_libcxx() {
+        let empty = TempDir::new().unwrap();
+        let state = compiler_args_state_v2(&["main.o"], false);
+        let err = rendered_link_args_v2(&state, empty.path()).unwrap_err();
+        assert!(format!("{err}").contains(V2_BUILTINS_LIB), "{err}");
+
+        // C++ needs libc++, which the C-only sysroot does not have.
+        let c_only = fake_v2_sysroot(false);
+        let state = compiler_args_state_v2(&["main.o"], true);
+        let err = rendered_link_args_v2(&state, c_only.path()).unwrap_err();
+        assert!(format!("{err}").contains("C++ is not supported"), "{err}");
+
+        let with_cxx = fake_v2_sysroot(true);
+        let args = rendered_link_args_v2(&state, with_cxx.path()).unwrap();
+        let cxx = args.iter().position(|a| a == "-lc++").unwrap();
+        let libc = args.iter().position(|a| a == "-lc").unwrap();
+        assert!(cxx < libc);
+    }
+
+    #[test]
+    fn test_v2_rejects_unsupported_modes() {
+        let check = |state: &State| check_v2_supported(&state.user_settings, &state.build_settings);
+
+        assert!(check(&compiler_args_state_v2(&["in.c"], false)).is_ok());
+        assert!(check(&compiler_args_state_v2(&["-c", "-fPIC", "in.c"], false)).is_ok());
+
+        for args in [
+            &["-shared", "in.c"][..],
+            &["-pie", "in.c"],
+            &["-Wl,-shared", "in.c"],
+            &["-fopenmp", "in.c"],
+        ] {
+            let err = check(&compiler_args_state_v2(args, false)).unwrap_err();
+            assert!(
+                format!("{err}").contains("wasm32-wasixv2"),
+                "{args:?}: {err}"
+            );
+        }
+
+        for (key, value) in [
+            ("WASM_EXCEPTIONS", "no"),
+            ("WASM_EXCEPTIONS", "legacy"),
+            ("PIC", "yes"),
+            ("MODULE_KIND", "dynamic-main"),
+            ("MODULE_KIND", "shared-library"),
+            ("GENERATE_SHELL_SCRIPT", "yes"),
+        ] {
+            let mut user_settings = crate::args::gather_user_settings(
+                &[
+                    "TARGET=wasm32-wasixv2".to_string(),
+                    format!("{key}={value}"),
+                ],
+                &Default::default(),
+            )
+            .unwrap();
+            let (_, build_settings) =
+                prepare_compiler_args(["in.c".to_string()], &mut user_settings, false).unwrap();
+            let err = check_v2_supported(&user_settings, &build_settings).unwrap_err();
+            assert!(
+                format!("{err}").contains("wasm32-wasixv2"),
+                "{key}={value}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_wasm_opt_command_per_target() {
+        let args_of = |state: &State| -> Option<Vec<String>> {
+            build_wasm_opt_command(state).map(|command| {
+                command
+                    .get_args()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect()
+            })
+        };
+
+        // Nothing to do for an unoptimized v2 module: no asyncify, ever.
+        let mut state = compiler_args_state_v2(&["-fno-exceptions", "in.c"], false);
+        assert_eq!(args_of(&state), None);
+
+        state.build_settings.opt_level = OptLevel::O2;
+        let args = args_of(&state).unwrap();
+        assert_eq!(args[0], "-O2");
+        assert!(
+            !args
+                .iter()
+                .any(|a| a == "--asyncify" || a == "--emit-exnref")
+        );
+        for feature in WASM_OPT_ENABLED_FEATURES_V2 {
+            assert!(args.iter().any(|a| a == feature), "{feature}: {args:?}");
+        }
+
+        // v1 keeps its asyncify default and feature list.
+        let state = compiler_args_state(&["-fno-exceptions", "in.c"], false);
+        let args = args_of(&state).unwrap();
+        assert_eq!(args[0], "--asyncify");
+        assert_eq!(&args[2..], WASM_OPT_ENABLED_FEATURES);
     }
 }
