@@ -18,6 +18,64 @@ const BINARYEN_HINT: &str = "Use `wasixccenv download-binaryen` to download a co
 #[cfg(not(feature = "download"))]
 const BINARYEN_HINT: &str = "Use -sBINARYEN_LOCATION to point at a compatible installation.";
 
+/// The platform wasixcc builds for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Target {
+    /// WASIX v1: wasix-libc sysroots, compiled with `--target=wasm32-wasi`.
+    #[default]
+    Wasix,
+    /// WASIX v2: the libc2 sysroot and the `wasm32-wasixv2` clang target.
+    WasixV2,
+}
+
+impl Target {
+    /// The triple passed to clang.
+    pub fn triple(self) -> &'static str {
+        match self {
+            Target::Wasix => "wasm32-wasi",
+            Target::WasixV2 => "wasm32-wasixv2",
+        }
+    }
+
+    pub fn is_v2(self) -> bool {
+        matches!(self, Target::WasixV2)
+    }
+
+    /// Parse the value of the TARGET setting.
+    fn from_setting(value: &str) -> Result<Self> {
+        match value {
+            "wasm32-wasi" | "wasix" | "v1" => Ok(Target::Wasix),
+            "wasm32-wasixv2" | "wasm32-unknown-wasixv2" | "wasixv2" | "v2" => Ok(Target::WasixV2),
+            _ => bail!(
+                "Invalid value {value} for TARGET; expected wasm32-wasi (the default) \
+                or wasm32-wasixv2"
+            ),
+        }
+    }
+
+    /// The target selected by a `--target`/`-target` value given to the
+    /// compiler. Only the v2 triples select a target; any other value keeps
+    /// the configured target and is discarded, as it always has been.
+    pub fn from_target_arg(value: &str) -> Option<Self> {
+        match value {
+            "wasm32-wasixv2" | "wasm32-unknown-wasixv2" => Some(Target::WasixV2),
+            _ => None,
+        }
+    }
+
+    fn default_llvm_location(self) -> PathBuf {
+        let dir = match self {
+            Target::Wasix => "llvm",
+            // v2 needs the 22.x LLVM fork, which must not replace the 21.x
+            // install v1 uses.
+            Target::WasixV2 => "llvm-wasixv2",
+        };
+        std::env::home_dir()
+            .map(|home| home.join(".wasixcc").join(dir))
+            .unwrap_or_else(|| PathBuf::from("/lib/wasixcc").join(dir))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlvmLocation {
     UserProvided(PathBuf),
@@ -103,30 +161,31 @@ impl Default for BinaryenLocation {
 /// compiler flags; e.g. `-fno-exceptions` takes priority over `-sWASM_EXCEPTIONS=1`.
 #[derive(Debug)]
 pub struct UserSettings {
-    pub sysroot_location: Option<PathBuf>,      // key name: SYSROOT
-    pub sysroot_prefix: PathBuf,                // key name: SYSROOT_PREFIX
-    pub llvm_location: LlvmLocation,            // key name: LLVM_LOCATION
-    pub binaryen_location: BinaryenLocation,    // key name: BINARYEN_LOCATION
-    pub extra_compiler_flags: Vec<String>,      // key name: COMPILER_FLAGS
-    pub extra_compiler_post_flags: Vec<String>, // key name: COMPILER_POST_FLAGS
-    pub extra_compiler_flags_c: Vec<String>,    // key name: COMPILER_FLAGS_C
-    pub extra_compiler_post_flags_c: Vec<String>, // key name: COMPILER_POST_FLAGS_C
-    pub extra_compiler_flags_cxx: Vec<String>,  // key name: COMPILER_FLAGS_CXX
+    pub target: Target,                             // key name: TARGET
+    pub sysroot_location: Option<PathBuf>,          // key name: SYSROOT
+    pub sysroot_prefix: PathBuf,                    // key name: SYSROOT_PREFIX
+    pub llvm_location: LlvmLocation,                // key name: LLVM_LOCATION
+    pub binaryen_location: BinaryenLocation,        // key name: BINARYEN_LOCATION
+    pub extra_compiler_flags: Vec<String>,          // key name: COMPILER_FLAGS
+    pub extra_compiler_post_flags: Vec<String>,     // key name: COMPILER_POST_FLAGS
+    pub extra_compiler_flags_c: Vec<String>,        // key name: COMPILER_FLAGS_C
+    pub extra_compiler_post_flags_c: Vec<String>,   // key name: COMPILER_POST_FLAGS_C
+    pub extra_compiler_flags_cxx: Vec<String>,      // key name: COMPILER_FLAGS_CXX
     pub extra_compiler_post_flags_cxx: Vec<String>, // key name: COMPILER_POST_FLAGS_CXX
-    pub extra_linker_flags: Vec<String>,        // key name: LINKER_FLAGS
-    pub include_cpp_symbols: bool,              // key name: INCLUDE_CPP_SYMBOLS
-    pub run_wasm_opt: Option<bool>,             // key name: RUN_WASM_OPT
-    pub wasm_opt_flags: Vec<String>,            // key name: WASM_OPT_FLAGS
-    pub wasm_opt_suppress_default: bool,        // key name: WASM_OPT_SUPPRESS_DEFAULT
-    pub wasm_opt_preserve_unoptimized: bool,    // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
-    pub module_kind: Option<ModuleKind>,        // key name: MODULE_KIND
-    pub wasm_exceptions: WasmExceptionStyle,    // key name: WASM_EXCEPTIONS
-    pub pic: bool,                              // key name: PIC
-    pub link_symbolic: bool,                    // key name: LINK_SYMBOLIC
-    pub generate_shell_script: bool,            // key name: GENERATE_SHELL_SCRIPT
-    pub shell_script_wasmer_args: Vec<String>,  // key name: SHELL_SCRIPT_WASMER_ARGS
-    pub discard_unsupported_flags: bool,        // key name: DISCARD_UNSUPPORTED_FLAGS
-    pub autoconf_workarounds: bool,             // key name: AUTOCONF_WORKAROUNDS
+    pub extra_linker_flags: Vec<String>,            // key name: LINKER_FLAGS
+    pub include_cpp_symbols: bool,                  // key name: INCLUDE_CPP_SYMBOLS
+    pub run_wasm_opt: Option<bool>,                 // key name: RUN_WASM_OPT
+    pub wasm_opt_flags: Vec<String>,                // key name: WASM_OPT_FLAGS
+    pub wasm_opt_suppress_default: bool,            // key name: WASM_OPT_SUPPRESS_DEFAULT
+    pub wasm_opt_preserve_unoptimized: bool,        // key name: WASM_OPT_PRESERVE_UNOPTIMIZED
+    pub module_kind: Option<ModuleKind>,            // key name: MODULE_KIND
+    pub wasm_exceptions: WasmExceptionStyle,        // key name: WASM_EXCEPTIONS
+    pub pic: bool,                                  // key name: PIC
+    pub link_symbolic: bool,                        // key name: LINK_SYMBOLIC
+    pub generate_shell_script: bool,                // key name: GENERATE_SHELL_SCRIPT
+    pub shell_script_wasmer_args: Vec<String>,      // key name: SHELL_SCRIPT_WASMER_ARGS
+    pub discard_unsupported_flags: bool,            // key name: DISCARD_UNSUPPORTED_FLAGS
+    pub autoconf_workarounds: bool,                 // key name: AUTOCONF_WORKAROUNDS
 }
 
 #[cfg(test)]
@@ -137,9 +196,22 @@ impl Default for UserSettings {
 }
 
 impl UserSettings {
+    /// Switch to `target`, e.g. when the compiler is given `--target=wasm32-wasixv2`.
+    /// A default LLVM location follows the target; a user-provided one is kept.
+    pub fn set_target(&mut self, target: Target) {
+        self.target = target;
+        if let LlvmLocation::DefaultPath(_) = self.llvm_location {
+            self.llvm_location = LlvmLocation::DefaultPath(target.default_llvm_location());
+        }
+    }
+
     pub fn sysroot_location(&self) -> Result<PathBuf> {
         if let Some(sysroot) = self.sysroot_location.as_deref() {
             Ok(sysroot.to_owned())
+        } else if self.target.is_v2() {
+            // v2 has a single sysroot: exception handling is always on and
+            // PIC is not supported yet.
+            Ok(self.sysroot_prefix.join("sysroot-wasixv2"))
         } else {
             match (self.wasm_exceptions, self.pic) {
                 (WasmExceptionStyle::Legacy, true) => Ok(self.sysroot_prefix.join("sysroot-ehpic")),
@@ -206,13 +278,14 @@ pub fn gather_user_settings(
     args: &[String],
     envs: &HashMap<String, String>,
 ) -> Result<UserSettings> {
+    let target = match try_get_user_setting_value("TARGET", args, envs)? {
+        Some(value) => Target::from_setting(&value)?,
+        None => Target::default(),
+    };
+
     let llvm_location = match try_get_user_setting_value("LLVM_LOCATION", args, envs)? {
         Some(path) => LlvmLocation::UserProvided(PathBuf::from(path)),
-        None => LlvmLocation::DefaultPath(
-            std::env::home_dir()
-                .map(|home| home.join(".wasixcc/llvm"))
-                .unwrap_or_else(|| PathBuf::from("/lib/wasixcc/llvm")),
-        ),
+        None => LlvmLocation::DefaultPath(target.default_llvm_location()),
     };
 
     let binaryen_location = match try_get_user_setting_value("BINARYEN_LOCATION", args, envs)? {
@@ -378,6 +451,7 @@ pub fn gather_user_settings(
     };
 
     Ok(UserSettings {
+        target,
         sysroot_location: sysroot_location.map(Into::into),
         sysroot_prefix,
         llvm_location,
@@ -579,5 +653,82 @@ mod tests {
         assert_eq!(settings.module_kind, Some(ModuleKind::SharedLibrary));
         assert_eq!(settings.wasm_exceptions, WasmExceptionStyle::Exnref);
         assert!(!settings.pic);
+        assert_eq!(settings.target, Target::Wasix);
+    }
+
+    #[test]
+    fn test_target_setting() {
+        let envs = HashMap::new();
+        for value in ["wasm32-wasixv2", "wasm32-unknown-wasixv2", "wasixv2", "v2"] {
+            let settings = gather_user_settings(&[format!("TARGET={value}")], &envs).unwrap();
+            assert_eq!(settings.target, Target::WasixV2, "TARGET={value}");
+        }
+        for value in ["wasm32-wasi", "wasix", "v1"] {
+            let settings = gather_user_settings(&[format!("TARGET={value}")], &envs).unwrap();
+            assert_eq!(settings.target, Target::Wasix, "TARGET={value}");
+        }
+        assert!(gather_user_settings(&["TARGET=x86_64-linux-gnu".to_string()], &envs).is_err());
+
+        // -sTARGET beats WASIXCC_TARGET, which beats the default.
+        let mut envs = HashMap::new();
+        envs.insert("WASIXCC_TARGET".to_string(), "wasm32-wasixv2".to_string());
+        let settings = gather_user_settings(&[], &envs).unwrap();
+        assert_eq!(settings.target, Target::WasixV2);
+        let settings = gather_user_settings(&["TARGET=wasm32-wasi".to_string()], &envs).unwrap();
+        assert_eq!(settings.target, Target::Wasix);
+    }
+
+    #[test]
+    fn test_target_selects_default_locations() {
+        let envs = HashMap::new();
+        let v1 = gather_user_settings(&["SYSROOT_PREFIX=/p".to_string()], &envs).unwrap();
+        let v2 = gather_user_settings(
+            &["SYSROOT_PREFIX=/p".to_string(), "TARGET=v2".to_string()],
+            &envs,
+        )
+        .unwrap();
+        assert_eq!(
+            v1.sysroot_location().unwrap(),
+            PathBuf::from("/p/sysroot-exnref-eh")
+        );
+        assert_eq!(
+            v2.sysroot_location().unwrap(),
+            PathBuf::from("/p/sysroot-wasixv2")
+        );
+        let LlvmLocation::DefaultPath(v1_llvm) = &v1.llvm_location else {
+            panic!("expected a default LLVM location")
+        };
+        let LlvmLocation::DefaultPath(v2_llvm) = &v2.llvm_location else {
+            panic!("expected a default LLVM location")
+        };
+        assert!(v1_llvm.ends_with("llvm"), "{v1_llvm:?}");
+        assert!(v2_llvm.ends_with("llvm-wasixv2"), "{v2_llvm:?}");
+
+        // Switching target later (from --target) moves a default LLVM
+        // location along, but never a user-provided one.
+        let mut settings = gather_user_settings(&[], &envs).unwrap();
+        settings.set_target(Target::WasixV2);
+        assert_eq!(settings.llvm_location, v2.llvm_location);
+        let mut settings =
+            gather_user_settings(&["LLVM_LOCATION=/my/llvm".to_string()], &envs).unwrap();
+        settings.set_target(Target::WasixV2);
+        assert_eq!(
+            settings.llvm_location,
+            LlvmLocation::UserProvided(PathBuf::from("/my/llvm"))
+        );
+    }
+
+    #[test]
+    fn test_sysroot_setting_overrides_v2_sysroot() {
+        let envs = HashMap::new();
+        let settings = gather_user_settings(
+            &["TARGET=v2".to_string(), "SYSROOT=/my/sysroot".to_string()],
+            &envs,
+        )
+        .unwrap();
+        assert_eq!(
+            settings.sysroot_location().unwrap(),
+            PathBuf::from("/my/sysroot")
+        );
     }
 }
