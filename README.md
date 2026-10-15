@@ -73,6 +73,10 @@ To use `wasixcc` in your GitHub Action use the following snippet
 
 This will setup wasixcc and all dependencies in less than 10 seconds.
 
+To set up [WASIX v2](#wasix-v2-preview) instead, pass `target: wasm32-wasixv2`.
+This installs the v2 LLVM and sysroot and sets `WASIXCC_TARGET=wasm32-wasixv2`
+for the following steps.
+
 ## Usage
 
 Environment management commands are available from the `wasixccenv` binary.
@@ -102,6 +106,7 @@ summary is provided here for reference:
 
 | Option                          | Description                                                                                    |
 | ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `TARGET`                        | Platform to build for: `wasm32-wasi` (WASIX v1, default) or `wasm32-wasixv2` (see [WASIX v2](#wasix-v2-preview)) |
 | `SYSROOT`                       | Set the sysroot location - not recommended, use SYSROOT_PREFIX instead where possible          |
 | `SYSROOT_PREFIX`                | Set the sysroot prefix directory                                                               |
 | `LLVM_LOCATION`                 | Set location of LLVM binaries                                                                  |
@@ -211,6 +216,43 @@ to side modules.
 To enable this behavior in `wasixcc`, you may need to explicitly set the module
 kind to dynamic-main by passing `-sMODULE_KIND=dynamic-main`.
 
+## WASIX v2 (preview)
+
+`wasixcc` can also build for WASIX v2 (`wasm32-wasixv2`), which pairs the
+[libc2](https://github.com/wasix-org/libc2) sysroot (musl, exposing the Linux
+syscall ABI) with the 22.x line of the
+[WASIX LLVM fork](https://github.com/wasix-org/llvm-project). v1 stays the
+default and is unaffected.
+
+Select v2 with the `TARGET` setting, or by passing `--target=wasm32-wasixv2`
+to the compiler (other `--target` values are still ignored):
+
+```sh
+# Download the v2 LLVM (to ~/.wasixcc/llvm-wasixv2) and sysroot
+# (to ~/.wasixcc/sysroot/sysroot-wasixv2). v1's LLVM is left alone.
+wasixccenv -sTARGET=wasm32-wasixv2 download-all
+
+wasixcc -sTARGET=wasm32-wasixv2 hello.c -o hello.wasm
+# or
+export WASIXCC_TARGET=wasm32-wasixv2
+wasixcc hello.c -o hello.wasm
+```
+
+v2 downloads are pinned to the releases this version of `wasixcc` was tested
+with, rather than `latest`. Until those releases are published, point
+`wasixcc` at local builds with `-sLLVM_LOCATION=<llvm install dir>` and
+`-sSYSROOT=<dir>/sysroot-wasixv2` (built with libc2's
+`wasix2/build-sysroot.sh`).
+
+The resulting module imports its memory as `env.memory` and everything else
+from the `wasixv2` module. Exception handling (exnref) and `setjmp`/`longjmp`
+are always enabled, including with `-fno-exceptions`.
+
+v2 is C only for now. These fail with an error instead of producing broken
+output: C++ (until the sysroot ships libc++), `PIC`, dynamic linking
+(`-shared`, `-pie`, `MODULE_KIND=dynamic-main|shared-library`),
+`WASM_EXCEPTIONS=no|legacy`, `GENERATE_SHELL_SCRIPT` and `-fopenmp`.
+
 ## Integration with build systems
 
 `wasixcc` can be integrated into different build systems to adapt existing
@@ -265,6 +307,11 @@ WASIXCC_RUN_WASM_OPT=no \
 # ... but make sure to enable it again during the build
 cmake --build ...
 ```
+
+For WASIX v2, use [wasixv2-toolchain.cmake](./wasixv2-toolchain.cmake)
+instead. It selects v2 through `CMAKE_<LANG>_COMPILER_TARGET` and finds the v2
+sysroot itself (via `wasixccenv -sTARGET=wasm32-wasixv2 print-sysroot`, unless
+`WASIX_SYSROOT` is set). With Autotools, export `WASIXCC_TARGET=wasm32-wasixv2`.
 
 ## Contributing
 
