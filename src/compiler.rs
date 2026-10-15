@@ -357,14 +357,10 @@ fn shell_script_path(state: &State) -> Result<(PathBuf, OsString)> {
     Ok((script_path, output_file_name))
 }
 
-fn compile_inputs(state: &mut State) -> Result<()> {
-    let compiler_path = state
-        .user_settings
-        .llvm_location
-        .get_tool_path(if state.cxx { "clang++" } else { "clang" });
-
-    let sysroot_path = state.user_settings.ensure_sysroot_location()?;
-
+// Assemble the clang arguments shared by every per-input compile (everything
+// after the tool name, minus the input and -o). Kept separate from spawning so
+// it can be unit-tested.
+fn build_compile_args(state: &State, sysroot_path: &Path) -> Vec<OsString> {
     let mut command_args: Vec<&OsStr> = vec![
         OsStr::new("--sysroot"),
         sysroot_path.as_os_str(),
@@ -420,6 +416,19 @@ fn compile_inputs(state: &mut State) -> Result<()> {
     for arg in &state.args.compiler_args {
         command_args.push(OsStr::new(arg.as_str()));
     }
+
+    command_args.into_iter().map(OsString::from).collect()
+}
+
+fn compile_inputs(state: &mut State) -> Result<()> {
+    let compiler_path = state
+        .user_settings
+        .llvm_location
+        .get_tool_path(if state.cxx { "clang++" } else { "clang" });
+
+    let sysroot_path = state.user_settings.ensure_sysroot_location()?;
+
+    let command_args = build_compile_args(state, &sysroot_path);
 
     if state.user_settings.module_kind().is_binary() {
         // If we're linking later, we should compile each input separately
@@ -1554,6 +1563,146 @@ mod tests {
         assert_eq!(
             &args[wa..wa + 3],
             &["--whole-archive", "libtest.a", "--no-whole-archive"]
+        );
+    }
+
+    fn rendered_compile_args(state: &State) -> Vec<String> {
+        build_compile_args(state, Path::new("/sysroot"))
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    // Pins the full v1 (wasm32-wasi) compile command line, so changes made for
+    // other targets can't silently alter it.
+    #[test]
+    fn test_v1_compile_args_snapshot() {
+        let state = compiler_args_state(&["-O2", "-g", "-DFOO=1", "in.c", "-o", "out"], false);
+        assert_eq!(
+            rendered_compile_args(&state),
+            [
+                "--sysroot",
+                "/sysroot",
+                "--target=wasm32-wasi",
+                "-c",
+                "-matomics",
+                "-mbulk-memory",
+                "-mmutable-globals",
+                "-pthread",
+                "-mthread-model",
+                "posix",
+                "-fno-trapping-math",
+                "-D_WASI_EMULATED_MMAN",
+                "-D_WASI_EMULATED_SIGNAL",
+                "-D_WASI_EMULATED_PROCESS_CLOCKS",
+                "-fwasm-exceptions",
+                "-mllvm",
+                "--wasm-enable-eh",
+                "-mllvm",
+                "--wasm-enable-sjlj",
+                "-mllvm",
+                "--wasm-use-legacy-eh=false",
+                "-ftls-model=local-exec",
+                "-g2",
+                "-msimd128",
+                "-mrelaxed-simd",
+                "-mextended-const",
+                "-O2",
+                "-g",
+                "-DFOO=1",
+            ]
+        );
+
+        let state = compiler_args_state(&["-fno-exceptions", "-fPIC", "in.c"], false);
+        assert_eq!(
+            rendered_compile_args(&state),
+            [
+                "--sysroot",
+                "/sysroot",
+                "--target=wasm32-wasi",
+                "-c",
+                "-matomics",
+                "-mbulk-memory",
+                "-mmutable-globals",
+                "-pthread",
+                "-mthread-model",
+                "posix",
+                "-fno-trapping-math",
+                "-D_WASI_EMULATED_MMAN",
+                "-D_WASI_EMULATED_SIGNAL",
+                "-D_WASI_EMULATED_PROCESS_CLOCKS",
+                "-fno-exceptions",
+                "-fPIC",
+                "-ftls-model=global-dynamic",
+                "-fvisibility=default",
+                "-msimd128",
+                "-mrelaxed-simd",
+                "-mextended-const",
+                "-fno-exceptions",
+                "-fPIC",
+            ]
+        );
+    }
+
+    // Pins the full v1 (wasm32-wasi) wasm-ld command line for a static main.
+    #[test]
+    fn test_v1_static_main_link_args_snapshot() {
+        let state = link_args_state(
+            ModuleKind::StaticMain,
+            vec![
+                LinkToken::Input(PathBuf::from("main.o")),
+                LinkToken::Flag("-lfoo".to_string()),
+            ],
+        );
+        assert_eq!(
+            rendered_link_args(&state),
+            [
+                "--extra-features=atomics",
+                "--extra-features=bulk-memory",
+                "--extra-features=mutable-globals",
+                "--shared-memory",
+                "--max-memory=4294967296",
+                "--import-memory",
+                "--export-dynamic",
+                "--export=__wasm_call_ctors",
+                "--no-demangle",
+                "-mllvm",
+                "--wasm-enable-eh",
+                "-mllvm",
+                "--wasm-enable-sjlj",
+                "-mllvm",
+                "--wasm-use-legacy-eh=false",
+                "-mllvm",
+                "--exception-model=wasm",
+                "--export=__wasm_init_tls",
+                "--export=__wasm_signal",
+                "--export=__tls_size",
+                "--export=__tls_align",
+                "--export=__tls_base",
+                "--export-if-defined=__indirect_function_table",
+                "--export-if-defined=__stack_pointer",
+                "--export-if-defined=__heap_base",
+                "--export-if-defined=__data_end",
+                "-L/sysroot/lib",
+                "-L/sysroot/lib/wasm32-wasi",
+                "-lwasi-emulated-getpid",
+                "-lwasi-emulated-mman",
+                "-lwasi-emulated-process-clocks",
+                "-lc",
+                "-lresolv",
+                "-lrt",
+                "-lm",
+                "-lpthread",
+                "-lutil",
+                "-lclang_rt.builtins-wasm32",
+                "-z",
+                "stack-size=8388608",
+                "main.o",
+                "-lfoo",
+                "/sysroot/lib/wasm32-wasi/crt1.o",
+                "-o",
+                "out.wasm",
+            ]
         );
     }
 }
