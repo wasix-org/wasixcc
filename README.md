@@ -244,6 +244,12 @@ with, rather than `latest`. Until those releases are published, point
 `-sSYSROOT=<dir>/sysroot-wasixv2` (built with libc2's
 `wasix2/build-sysroot.sh`).
 
+Run the output with `wasmer run hello.wasm`. No wasmer release runs v2 modules
+yet; build `wasmer-cli` (`--features cranelift`) from the `feat/wasixv2` branch
+of [wasmerio/wasmer](https://github.com/wasmerio/wasmer). The end-to-end test
+`tests/wasixv2.rs` uses `WASIXCC_TEST_WASIXV2_WASMER=<path to wasmer>`, or
+`wasmer` on `PATH` if it can run v2 modules.
+
 The resulting module imports its memory as `env.memory` and everything else
 from the `wasixv2` module. Exception handling (exnref) and `setjmp`/`longjmp`
 are always enabled, including with `-fno-exceptions`.

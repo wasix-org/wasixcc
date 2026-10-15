@@ -4,9 +4,13 @@
 //! It needs the v2 LLVM fork and the libc2 sysroot, found the same way wasixcc
 //! finds them (`WASIXCC_LLVM_LOCATION` or `~/.wasixcc/llvm-wasixv2`,
 //! `WASIXCC_SYSROOT` or `~/.wasixcc/sysroot/sysroot-wasixv2`). Without them the
-//! test is skipped, unless `WASIXCC_TEST_WASIXV2_REQUIRED=1`. With
-//! `WASIXCC_TEST_WASIXV2_HOST=<libc2>/wasix2/test/host.mjs` the programs are
-//! also run under node.
+//! test is skipped, unless `WASIXCC_TEST_WASIXV2_REQUIRED=1`.
+//!
+//! The programs are also run with `wasmer run`, using
+//! `WASIXCC_TEST_WASIXV2_WASMER=<path>` or else `wasmer` on `PATH` if it can
+//! run wasixv2 modules (no wasmer release can yet; build `wasmer-cli` from
+//! wasmerio/wasmer's `feat/wasixv2` branch). Without one, running is skipped,
+//! unless `WASIXCC_TEST_WASIXV2_REQUIRED=1`.
 
 // Spawns host processes, which a WASIX test module can't do.
 #![cfg(all(unix, not(target_family = "wasm")))]
@@ -39,6 +43,21 @@ int main(int argc, char **argv) {
 
 const EXPECTED_OUTPUT: &str = "hello from wasixv2: setjmp 3, 0.333\n";
 
+/// Exits with status 42 under a wasmer that runs wasixv2 modules:
+///
+/// ```wat
+/// (module
+///   (import "env" "memory" (memory 1 1 shared))
+///   (import "wasixv2" "exit_group" (func $exit_group (param i32)))
+///   (func (export "_start") (call $exit_group (i32.const 42))))
+/// ```
+const PROBE: &[u8] = b"\0asm\x01\0\0\0\
+    \x01\x08\x02\x60\x01\x7f\x00\x60\x00\x00\
+    \x02\x25\x02\x03env\x06memory\x02\x03\x01\x01\x07wasixv2\x0aexit_group\x00\x00\
+    \x03\x02\x01\x01\
+    \x07\x0a\x01\x06_start\x00\x01\
+    \x0a\x08\x01\x06\x00\x41\x2a\x10\x00\x0b";
+
 fn home() -> PathBuf {
     PathBuf::from(env::var_os("HOME").expect("HOME is not set"))
 }
@@ -59,6 +78,10 @@ fn sysroot_location() -> PathBuf {
         .join("sysroot-wasixv2")
 }
 
+fn required() -> bool {
+    env::var("WASIXCC_TEST_WASIXV2_REQUIRED").is_ok_and(|v| v == "1")
+}
+
 fn toolchain_available() -> bool {
     let missing: Vec<PathBuf> = [
         llvm_location().join("bin/clang"),
@@ -71,7 +94,7 @@ fn toolchain_available() -> bool {
     if missing.is_empty() {
         return true;
     }
-    if env::var("WASIXCC_TEST_WASIXV2_REQUIRED").is_ok_and(|v| v == "1") {
+    if required() {
         panic!("wasm32-wasixv2 toolchain not found: {missing:?}");
     }
     eprintln!("skipping: wasm32-wasixv2 toolchain not found: {missing:?}");
@@ -107,6 +130,7 @@ fn compile_and_link_c_for_wasixv2() {
     let dir = tempfile::TempDir::new().unwrap();
     let dir = dir.path();
     std::fs::write(dir.join("hello.c"), PROGRAM).unwrap();
+    let wasmer = wasmer(dir);
 
     // One step, selected by the TARGET setting.
     let mut command = wasixcc(dir);
@@ -143,11 +167,8 @@ fn compile_and_link_c_for_wasixv2() {
             );
         }
 
-        if let Some(host) = env::var_os("WASIXCC_TEST_WASIXV2_HOST") {
-            assert_eq!(
-                run_in_node(Path::new(&host), &dir.join(wasm)),
-                EXPECTED_OUTPUT
-            );
+        if let Some(wasmer) = &wasmer {
+            assert_eq!(run_in_wasmer(wasmer, &dir.join(wasm)), EXPECTED_OUTPUT);
         }
     }
 }
@@ -193,20 +214,40 @@ fn cxx_link_without_libcxx_fails_clearly() {
     assert!(stderr.contains("C++ is not supported"), "{stderr}");
 }
 
-fn run_in_node(host: &Path, wasm: &Path) -> String {
-    // Node < 24 needs a flag for exnref exception handling.
-    let mut command = Command::new("node");
-    if Command::new("node")
-        .args(["--experimental-wasm-exnref", "-e", "0"])
+/// The wasmer to run the programs with, if there is one that runs wasixv2
+/// modules.
+fn wasmer(dir: &Path) -> Option<PathBuf> {
+    let (wasmer, explicit) = match env::var_os("WASIXCC_TEST_WASIXV2_WASMER") {
+        Some(wasmer) => (PathBuf::from(wasmer), true),
+        None => (PathBuf::from("wasmer"), false),
+    };
+    let probe = dir.join("probe.wasm");
+    std::fs::write(&probe, PROBE).unwrap();
+    let runs_wasixv2 = Command::new(&wasmer)
+        .arg("run")
+        .arg(&probe)
         .output()
-        .is_ok_and(|output| output.status.success())
-    {
-        command.arg("--experimental-wasm-exnref");
+        .is_ok_and(|output| output.status.code() == Some(42));
+    if runs_wasixv2 {
+        return Some(wasmer);
     }
-    let output = command.arg(host).arg(wasm).output().unwrap();
+
+    let problem = format!("{wasmer:?} is missing or cannot run wasixv2 modules");
+    if explicit || required() {
+        panic!("no wasmer to run the programs: {problem}");
+    }
+    eprintln!(
+        "not running the programs: {problem}; set WASIXCC_TEST_WASIXV2_WASMER to a wasmer \
+         built from wasmerio/wasmer's feat/wasixv2 branch"
+    );
+    None
+}
+
+fn run_in_wasmer(wasmer: &Path, wasm: &Path) -> String {
+    let output = Command::new(wasmer).arg("run").arg(wasm).output().unwrap();
     assert!(
         output.status.success(),
-        "{wasm:?} failed under node with {}: {}",
+        "{wasm:?} failed under wasmer with {}: {}",
         output.status,
         String::from_utf8_lossy(&output.stderr)
     );
