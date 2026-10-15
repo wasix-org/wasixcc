@@ -250,6 +250,9 @@ pub(crate) fn run(args: Vec<String>, mut user_settings: UserSettings, run_cxx: b
     if user_settings.target.is_v2() {
         check_v2_supported(&user_settings, &build_settings)?;
         ensure_v2_llvm(&user_settings)?;
+        if run_cxx {
+            ensure_v2_libcxx(&user_settings.ensure_sysroot_location()?)?;
+        }
     }
 
     let temp_dir = tempfile::TempDir::new().context("Failed to create temporary directory")?;
@@ -571,6 +574,23 @@ fn ensure_v2_llvm(user_settings: &UserSettings) -> Result<()> {
     Ok(())
 }
 
+// The first v2 sysroots are C only. Fail up front rather than on a missing
+// C++ header or library.
+fn ensure_v2_libcxx(sysroot_path: &Path) -> Result<()> {
+    if !sysroot_path
+        .join(V2_SYSROOT_LIB_DIR)
+        .join("libc++.a")
+        .exists()
+    {
+        bail!(
+            "C++ is not supported for wasm32-wasixv2 yet: the sysroot at {} has no \
+            libc++ ({V2_SYSROOT_LIB_DIR}/libc++.a)",
+            sysroot_path.display()
+        );
+    }
+    Ok(())
+}
+
 // Reject the v1 features v2 does not support yet, instead of producing
 // broken output.
 fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettings) -> Result<()> {
@@ -588,9 +608,6 @@ fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettin
             }
         ),
     }
-    if user_settings.pic {
-        bail!("PIC is not supported for {TARGET} yet");
-    }
     if let kind @ (ModuleKind::DynamicMain | ModuleKind::SharedLibrary) =
         user_settings.module_kind()
     {
@@ -598,6 +615,10 @@ fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettin
             "Dynamic linking is not supported for {TARGET} yet (module kind {kind:?}, \
             from -shared, -pie or MODULE_KIND)"
         );
+    }
+    // After the module kind check: dynamic module kinds imply PIC.
+    if user_settings.pic {
+        bail!("PIC is not supported for {TARGET} yet");
     }
     if user_settings.generate_shell_script {
         bail!("GENERATE_SHELL_SCRIPT is not supported for {TARGET} yet");
@@ -752,13 +773,7 @@ fn build_link_args_v2(
 
         // The same order the driver uses: C++ runtime, -lpthread -lc, builtins.
         if state.cxx || state.user_settings.include_cpp_symbols {
-            if !lib_dir.join("libc++.a").exists() {
-                bail!(
-                    "C++ is not supported for wasm32-wasixv2 yet: the sysroot at {} \
-                    has no libc++ ({V2_SYSROOT_LIB_DIR}/libc++.a)",
-                    sysroot_path.display()
-                );
-            }
+            ensure_v2_libcxx(sysroot_path)?;
             args.push(OsString::from("-lc++"));
             args.push(OsString::from("-lc++abi"));
         }
@@ -2293,14 +2308,15 @@ mod tests {
             &["-shared", "in.c"][..],
             &["-pie", "in.c"],
             &["-Wl,-shared", "in.c"],
-            &["-fopenmp", "in.c"],
         ] {
             let err = check(&compiler_args_state_v2(args, false)).unwrap_err();
             assert!(
-                format!("{err}").contains("wasm32-wasixv2"),
+                format!("{err}").contains("Dynamic linking"),
                 "{args:?}: {err}"
             );
         }
+        let err = check(&compiler_args_state_v2(&["-fopenmp", "in.c"], false)).unwrap_err();
+        assert!(format!("{err}").contains("OpenMP"), "{err}");
 
         for (key, value) in [
             ("WASM_EXCEPTIONS", "no"),
