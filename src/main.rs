@@ -93,11 +93,28 @@ fn run_tool_with_passthrough_args(
     compiler::run_command(command)
 }
 
+/// PURE mode: runs `tool` from the configured LLVM with the arguments unchanged, and no
+/// wasixcc banner, so that wasixcc behaves exactly like that tool. Only TARGET and LLVM_LOCATION
+/// matter, to find it.
+fn run_pure(tool: &str, args: Vec<String>, mut user_settings: UserSettings) -> Result<()> {
+    tracing::info!("Running {tool} in PURE mode");
+    user_settings.apply_target_arg(&args);
+    let mut command = Command::new(user_settings.llvm_location.get_tool_path(tool));
+    command.args(args);
+    compiler::run_command(command)
+}
+
 fn run_compiler(run_cxx: bool) -> Result<()> {
     tracing::info!("Starting in compiler mode");
 
     let (args, user_settings) = get_args_and_user_settings()?;
-    if is_version_command() {
+    if user_settings.pure {
+        run_pure(
+            if run_cxx { "clang++" } else { "clang" },
+            args,
+            user_settings,
+        )
+    } else if is_version_command() {
         run_tool_with_passthrough_args(
             if run_cxx { "clang++" } else { "clang" },
             args,
@@ -112,7 +129,9 @@ fn run_linker() -> Result<()> {
     tracing::info!("Starting in linker mode");
 
     let (args, user_settings) = get_args_and_user_settings()?;
-    if is_version_command() {
+    if user_settings.pure {
+        run_pure("wasm-ld", args, user_settings)
+    } else if is_version_command() {
         run_tool_with_passthrough_args("wasm-ld", args, user_settings)
     } else {
         compiler::link_only(args, user_settings)
@@ -190,5 +209,45 @@ mod tests {
         };
         run_tool_with_passthrough_args("dummytool", vec!["X".into(), "Y".into()], user_settings)
             .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_run_pure_passes_arguments_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let bin = tmp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let out = tmp.path().join("args.txt");
+        let clang = bin.join("clang");
+        fs::write(
+            &clang,
+            format!(
+                "#!/bin/sh
+printf '%s\\n' \"$@\" > {}\n",
+                out.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&clang, fs::Permissions::from_mode(0o755)).unwrap();
+        let user_settings = UserSettings {
+            llvm_location: LlvmLocation::UserProvided(tmp.path().to_path_buf()),
+            pure: true,
+            ..Default::default()
+        };
+        let args = [
+            "--target=wasm32-wasixv2",
+            "-nostdinc",
+            "-c",
+            "a.c",
+            "-o",
+            "a.o",
+        ];
+        run_pure("clang", args.map(String::from).to_vec(), user_settings).unwrap();
+        assert_eq!(
+            fs::read_to_string(out).unwrap(),
+            format!("{}\n", args.join("\n"))
+        );
     }
 }

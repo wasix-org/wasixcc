@@ -151,8 +151,15 @@ install_executables() {
     "$WASIXCC_EXECUTABLE" install-executables "$WASIXCC_BIN"
 }
 
-# Download sysroot, LLVM, and Binaryen
+# Download sysroot, LLVM, and Binaryen.
+# wasixccenv honors WASIXCC_TARGET: run the installer with
+# WASIXCC_TARGET=wasm32-wasixv2 to install the WASIX v2 toolchain instead. For
+# v2, 'latest' downloads the releases this wasixcc version is pinned to.
 download_dependencies() {
+    if test -n "$WASIXCC_TARGET" ; then
+        log "Installing the toolchain for $WASIXCC_TARGET"
+    fi
+
     case "$WASIXCC_SYSROOT_TAG" in
         latest) "$WASIXCC_EXECUTABLE" download-sysroot ;;
         "") : ;;
