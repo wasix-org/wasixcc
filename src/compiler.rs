@@ -753,7 +753,13 @@ fn build_link_args_v2(
     // An 8 MiB stack, as for v1 and the Linux main thread, instead of the
     // driver's 1 MiB. It follows the driver's default and precedes the user's
     // link tokens, so a user `-z stack-size=` still wins.
-    for flag in ["-z", "stack-size=8388608"] {
+    // Function table indices 1 and 2 must stay empty: they are SIG_IGN and
+    // SIG_HOLD, and the wasixv2 ABI (signal-callback-register) passes signal
+    // handlers as table indices. wasm-ld's default table base of 1 would put
+    // the first address-taken function at SIG_IGN. Index 0 stays null, as
+    // always. Dynamic linking, where the loader picks the table base, is
+    // rejected for v2 (check_v2_supported).
+    for flag in ["-z", "stack-size=8388608", "--table-base=3"] {
         args.push(OsString::from("-Xlinker"));
         args.push(OsString::from(flag));
     }
@@ -2216,6 +2222,8 @@ mod tests {
                 "-z",
                 "-Xlinker",
                 "stack-size=8388608",
+                "-Xlinker",
+                "--table-base=3",
                 "main.o",
                 "-Xlinker",
                 "--whole-archive",
