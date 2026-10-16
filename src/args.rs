@@ -225,9 +225,12 @@ impl UserSettings {
         if let Some(sysroot) = self.sysroot_location.as_deref() {
             Ok(sysroot.to_owned())
         } else if self.target.is_v2() {
-            // v2 has a single sysroot: exception handling is always on and
-            // PIC is not supported yet.
-            Ok(self.sysroot_prefix.join("sysroot-wasixv2"))
+            // One sysroot per v2 build configuration: exception handling
+            // (the default), or asyncify without it. PIC is not supported yet.
+            match self.wasm_exceptions {
+                WasmExceptionStyle::Off => Ok(self.sysroot_prefix.join("sysroot-wasixv2-asyncify")),
+                _ => Ok(self.sysroot_prefix.join("sysroot-wasixv2")),
+            }
         } else {
             match (self.wasm_exceptions, self.pic) {
                 (WasmExceptionStyle::Legacy, true) => Ok(self.sysroot_prefix.join("sysroot-ehpic")),

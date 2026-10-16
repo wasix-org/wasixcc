@@ -255,7 +255,16 @@ the programs built against it use the same toolchain.
 
 The resulting module imports its memory as `env.memory` and everything else
 from the `wasixv2` module. Exception handling (exnref) and `setjmp`/`longjmp`
-are always enabled, including with `-fno-exceptions`.
+are enabled by default, including with `-fno-exceptions`.
+
+`WASM_EXCEPTIONS=no` selects v2's asyncify configuration instead, which
+programs that call `fork` need: wasm exception handling is off
+(`-fno-exceptions -mno-exception-handling`), the sysroot is
+`<SYSROOT_PREFIX>/sysroot-wasixv2-asyncify` (libc2's
+`make wasixv2-sysroot-asyncify`), and `wasm-opt --asyncify` instruments the
+code that can reach the imports that unwind the stack (`clone`,
+`stack_save`, `checkpoint`). `setjmp`/`longjmp` then go through asyncify as
+well. `download-sysroot` does not fetch that sysroot yet.
 
 Programs get an 8 MiB stack, as with v1; override it with
 `-Wl,-z,stack-size=<bytes>`.
@@ -263,7 +272,7 @@ Programs get an 8 MiB stack, as with v1; override it with
 v2 is C only for now. These fail with an error instead of producing broken
 output: linking C++ (until the sysroot ships libc++), `PIC`, dynamic linking
 (`-shared`, `-pie`, `MODULE_KIND=dynamic-main|shared-library`),
-`WASM_EXCEPTIONS=no|legacy`, `GENERATE_SHELL_SCRIPT` and `-fopenmp`.
+`WASM_EXCEPTIONS=legacy`, `GENERATE_SHELL_SCRIPT` and `-fopenmp`.
 
 ## Integration with build systems
 

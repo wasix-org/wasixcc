@@ -46,6 +46,15 @@ static WASM_OPT_ENABLED_FEATURES_V2: &[&str] = &[
     "--enable-nontrapping-float-to-int",
 ];
 
+// What the v2 asyncify configuration compiles with: no wasm exceptions at all,
+// after the user's flags so they cannot turn them back on.
+const V2_ASYNCIFY_COMPILE_FLAGS: &[&str] = &["-fno-exceptions", "-mno-exception-handling"];
+
+// The v2 imports that unwind the stack in the asyncify configuration; asyncify
+// instruments only the code that can reach them.
+const V2_ASYNCIFY_IMPORTS: &str =
+    "asyncify-imports@wasixv2.clone,wasixv2.stack_save,wasixv2.checkpoint";
+
 // Where the v2 sysroot keeps crt and libraries. The driver searches only this
 // multiarch directory, not plain lib/.
 const V2_SYSROOT_LIB_DIR: &str = "lib/wasm32-wasixv2";
@@ -480,11 +489,20 @@ fn build_compile_args(state: &State, sysroot_path: &Path) -> Vec<OsString> {
 
 // v2 compiles lean on the wasm32-wasixv2 driver defaults: threads, TLS model,
 // wasm features and exnref EH with wasm SjLj all come from the target, so
-// wasixcc only names the target and the sysroot.
+// wasixcc only names the target and the sysroot. The asyncify configuration
+// (WASM_EXCEPTIONS=no) turns wasm exception handling off, since asyncify
+// cannot instrument it; setjmp is then a libc function.
 fn build_compile_args_v2(state: &State, sysroot_path: &Path) -> Vec<OsString> {
     let mut command_args = v2_driver_args(sysroot_path);
     command_args.push(OsString::from("-c"));
     command_args.extend(state.args.compiler_args.iter().map(OsString::from));
+
+    if !state.user_settings.wasm_exceptions.is_enabled() {
+        for flag in V2_ASYNCIFY_COMPILE_FLAGS {
+            command_args.push(OsString::from(flag));
+        }
+        return command_args;
+    }
 
     // -fno-exceptions turns the driver's whole EH default off, wasm SjLj
     // included. setjmp is lowered by the compiler on v2 (libc2 has no
@@ -600,15 +618,11 @@ fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettin
     const TARGET: &str = "wasm32-wasixv2";
 
     match user_settings.wasm_exceptions {
-        WasmExceptionStyle::Exnref => {}
-        WasmExceptionStyle::Off | WasmExceptionStyle::Legacy => bail!(
-            "WASM_EXCEPTIONS={} is not supported for {TARGET}: it always uses exnref \
-            exception handling, which setjmp/longjmp are built on",
-            if user_settings.wasm_exceptions.is_legacy() {
-                "legacy"
-            } else {
-                "no"
-            }
+        // Exception handling, or the asyncify configuration without it.
+        WasmExceptionStyle::Exnref | WasmExceptionStyle::Off => {}
+        WasmExceptionStyle::Legacy => bail!(
+            "WASM_EXCEPTIONS=legacy is not supported for {TARGET}: it uses exnref \
+            exception handling, or none in the asyncify configuration (WASM_EXCEPTIONS=no)"
         ),
     }
     if let kind @ (ModuleKind::DynamicMain | ModuleKind::SharedLibrary) =
@@ -1023,9 +1037,15 @@ fn build_wasm_opt_command(state: &State) -> Option<Command> {
     );
 
     if !state.user_settings.wasm_opt_suppress_default {
-        // v2 modules always use exnref EH and need neither conversion nor
-        // asyncify.
-        if !state.user_settings.target.is_v2() {
+        // v2 modules use exnref EH, which needs no conversion, or are built for
+        // the asyncify configuration, which only the imports that unwind make
+        // asyncify instrument.
+        if state.user_settings.target.is_v2() {
+            if !state.user_settings.wasm_exceptions.is_enabled() {
+                command.arg("--asyncify");
+                command.arg(format!("--pass-arg={V2_ASYNCIFY_IMPORTS}"));
+            }
+        } else {
             match state.user_settings.wasm_exceptions {
                 WasmExceptionStyle::Exnref => {
                     // No conversion to exnref needed
@@ -2342,7 +2362,6 @@ mod tests {
         assert!(format!("{err}").contains("OpenMP"), "{err}");
 
         for (key, value) in [
-            ("WASM_EXCEPTIONS", "no"),
             ("WASM_EXCEPTIONS", "legacy"),
             ("PIC", "yes"),
             ("MODULE_KIND", "dynamic-main"),
@@ -2368,6 +2387,55 @@ mod tests {
     }
 
     #[test]
+    fn test_v2_asyncify_configuration() {
+        let mut user_settings = crate::args::gather_user_settings(
+            &[
+                "TARGET=wasm32-wasixv2".to_string(),
+                "WASM_EXCEPTIONS=no".to_string(),
+                "SYSROOT_PREFIX=/p".to_string(),
+            ],
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            user_settings.sysroot_location().unwrap(),
+            PathBuf::from("/p/sysroot-wasixv2-asyncify")
+        );
+        let (args, build_settings) = prepare_compiler_args(
+            ["-fexceptions".to_string(), "in.c".to_string()],
+            &mut user_settings,
+            false,
+        )
+        .unwrap();
+        check_v2_supported(&user_settings, &build_settings).unwrap();
+        let state = State {
+            user_settings,
+            build_settings,
+            args,
+            cxx: false,
+            temp_dir: PathBuf::from("."),
+        };
+        let args: Vec<String> =
+            build_compile_args(&state, Path::new("/p/sysroot-wasixv2-asyncify"))
+                .into_iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+        // Exception handling stays off whatever the user passed before, and the
+        // EH configuration's SjLj workaround does not apply.
+        assert!(
+            args.ends_with(&[
+                "-fno-exceptions".to_string(),
+                "-mno-exception-handling".to_string()
+            ]),
+            "{args:?}"
+        );
+        assert!(
+            !args.iter().any(|a| a.contains("wasm-enable-sjlj")),
+            "{args:?}"
+        );
+    }
+
+    #[test]
     fn test_wasm_opt_command_per_target() {
         let args_of = |state: &State| -> Option<Vec<String>> {
             build_wasm_opt_command(state).map(|command| {
@@ -2378,7 +2446,8 @@ mod tests {
             })
         };
 
-        // Nothing to do for an unoptimized v2 module: no asyncify, ever.
+        // Nothing to do for an unoptimized v2 module with exception handling:
+        // -fno-exceptions alone does not pick the asyncify configuration.
         let mut state = compiler_args_state_v2(&["-fno-exceptions", "in.c"], false);
         assert_eq!(args_of(&state), None);
 
@@ -2393,6 +2462,17 @@ mod tests {
         for feature in WASM_OPT_ENABLED_FEATURES_V2 {
             assert!(args.iter().any(|a| a == feature), "{feature}: {args:?}");
         }
+
+        // The v2 asyncify configuration instruments what reaches the imports
+        // that unwind, before optimizing.
+        let mut state = compiler_args_state_v2(&["in.c"], false);
+        state.user_settings.wasm_exceptions = WasmExceptionStyle::Off;
+        let args = args_of(&state).unwrap();
+        assert_eq!(args[0], "--asyncify");
+        assert_eq!(args[1], format!("--pass-arg={V2_ASYNCIFY_IMPORTS}"));
+        assert!(args[1].contains("wasixv2.clone") && args[1].contains("wasixv2.stack_save"));
+        state.build_settings.opt_level = OptLevel::O2;
+        assert_eq!(args_of(&state).unwrap()[2], "-O2");
 
         // v1 keeps its asyncify default and feature list.
         let state = compiler_args_state(&["-fno-exceptions", "in.c"], false);

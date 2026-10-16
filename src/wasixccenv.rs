@@ -283,8 +283,10 @@ The following configuration options are available:
                                  wasix-libc sysroots
                            * wasm32-wasixv2: WASIX v2, using the libc2
                                  sysroot and the 22.x LLVM fork. C only
-                                 for now; no PIC, dynamic linking,
-                                 asyncify or legacy exceptions.
+                                 for now; no PIC, dynamic linking or
+                                 legacy exceptions. WASM_EXCEPTIONS=no
+                                 selects its asyncify configuration,
+                                 which programs that fork need.
                            Passing `--target=wasm32-wasixv2` to the compiler
                            also selects v2. Other `--target` values are
                            ignored. wasixccenv uses TARGET to decide what
@@ -302,7 +304,9 @@ The following configuration options are available:
                              - 'sysroot-eh'
                              - 'sysroot-ehpic'
                            For TARGET=wasm32-wasixv2, the sysroot is the
-                           'sysroot-wasixv2' subdirectory instead.
+                           'sysroot-wasixv2' subdirectory instead, or
+                           'sysroot-wasixv2-asyncify' for
+                           WASM_EXCEPTIONS=no.
   LLVM_LOCATION=<PATH>     Set the location of LLVM toolchain which will be
                            invoked without a version suffix. The path must
                            point to the installation directory of the
@@ -361,7 +365,10 @@ The following configuration options are available:
                                  backend in Wasmer)
                            * `--asyncify` for modules without exception
                                  handling enabled, required for forks and
-                                 setjmp/longjmp to work
+                                 setjmp/longjmp to work. For
+                                 wasm32-wasixv2, only code that reaches
+                                 the imports that unwind (clone,
+                                 stack_save, checkpoint) is instrumented
   WASM_OPT_PRESERVE_UNOPTIMIZED=<BOOL>
                            Whether to preserve a copy of the unoptimized
                            artifact before running wasm-opt. If the wasm-opt
