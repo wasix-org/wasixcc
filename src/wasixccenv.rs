@@ -33,18 +33,20 @@ enum WasixccCommand {
     /// Install wasixcc executables (via symlinks to this binary) to the
     /// specified path
     InstallExecutables { path: PathBuf },
-    /// Download the WASIX sysroot
+    /// Download the WASIX sysroot for the configured TARGET
     #[cfg(feature = "download")]
     DownloadSysroot {
         /// The tag from which to download the sysroot, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag starting with 'v'. Defaults to 'latest', or to the
+        /// release this wasixcc is pinned to for wasm32-wasixv2.
         tag: Option<TagSpec>,
     },
-    /// Download the custom LLVM toolchain (Unix only)
+    /// Download the custom LLVM toolchain for the configured TARGET (Unix only)
     #[cfg(feature = "download")]
     DownloadLlvm {
         /// The tag from which to download the LLVM toolchain, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag. Defaults to 'latest', or to the release this wasixcc
+        /// is pinned to for wasm32-wasixv2.
         tag: Option<TagSpec>,
     },
     /// Download binaryen (Unix only)
@@ -59,11 +61,13 @@ enum WasixccCommand {
     DownloadAll {
         #[arg(long)]
         /// The tag from which to download the sysroot, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag starting with 'v'. Defaults to 'latest', or to the
+        /// pinned release for wasm32-wasixv2.
         sysroot_tag: Option<TagSpec>,
         #[arg(long)]
         /// The tag from which to download the LLVM toolchain, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag. Defaults to 'latest', or to the pinned release for
+        /// wasm32-wasixv2.
         llvm_tag: Option<TagSpec>,
         #[arg(long)]
         /// The tag from which to download binaryen, either 'latest' or a
@@ -74,11 +78,13 @@ enum WasixccCommand {
     AioInstall {
         #[arg(long)]
         /// The tag from which to download the sysroot, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag starting with 'v'. Defaults to 'latest', or to the
+        /// pinned release for wasm32-wasixv2.
         sysroot_tag: Option<TagSpec>,
         #[arg(long)]
         /// The tag from which to download the LLVM toolchain, either 'latest' or a
-        /// specific tag starting with 'v'. Defaults to 'latest'.
+        /// specific tag. Defaults to 'latest', or to the pinned release for
+        /// wasm32-wasixv2.
         llvm_tag: Option<TagSpec>,
         #[arg(long)]
         /// The tag from which to download binaryen, either 'latest' or a
@@ -102,13 +108,15 @@ pub(crate) fn run() -> Result<()> {
     match args.command {
         WasixccCommand::InstallExecutables { path } => install_executables(path),
         #[cfg(feature = "download")]
-        WasixccCommand::DownloadSysroot { tag } => {
-            download_sysroot(tag.unwrap_or(TagSpec::Latest), &user_settings)
-        }
+        WasixccCommand::DownloadSysroot { tag } => download_sysroot(
+            tag.unwrap_or_else(|| TagSpec::default_sysroot(user_settings.target)),
+            &user_settings,
+        ),
         #[cfg(feature = "download")]
-        WasixccCommand::DownloadLlvm { tag } => {
-            download_llvm(tag.unwrap_or(TagSpec::Latest), &user_settings)
-        }
+        WasixccCommand::DownloadLlvm { tag } => download_llvm(
+            tag.unwrap_or_else(|| TagSpec::default_llvm(user_settings.target)),
+            &user_settings,
+        ),
         #[cfg(feature = "download")]
         WasixccCommand::DownloadBinaryen { tag } => {
             download_binaryen(tag.unwrap_or(TagSpec::Latest), &user_settings)
@@ -119,8 +127,14 @@ pub(crate) fn run() -> Result<()> {
             llvm_tag,
             sysroot_tag,
         } => {
-            download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
-            download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_llvm(
+                llvm_tag.unwrap_or_else(|| TagSpec::default_llvm(user_settings.target)),
+                &user_settings,
+            )?;
+            download_sysroot(
+                sysroot_tag.unwrap_or_else(|| TagSpec::default_sysroot(user_settings.target)),
+                &user_settings,
+            )?;
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             Ok(())
         }
@@ -131,8 +145,14 @@ pub(crate) fn run() -> Result<()> {
             sysroot_tag,
             path,
         } => {
-            download_llvm(llvm_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
-            download_sysroot(sysroot_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
+            download_llvm(
+                llvm_tag.unwrap_or_else(|| TagSpec::default_llvm(user_settings.target)),
+                &user_settings,
+            )?;
+            download_sysroot(
+                sysroot_tag.unwrap_or_else(|| TagSpec::default_sysroot(user_settings.target)),
+                &user_settings,
+            )?;
             download_binaryen(binaryen_tag.unwrap_or(TagSpec::Latest), &user_settings)?;
             install_executables(path)?;
             Ok(())
@@ -258,6 +278,19 @@ where to download the sysroot and LLVM toolchain to, as well as when using
 specified first (e.g., 'wasixccenv -sSYSROOT=... download-sysroot').
 
 The following configuration options are available:
+  TARGET=<TARGET>          The platform to build for:
+                           * wasm32-wasi (default): WASIX v1, using the
+                                 wasix-libc sysroots
+                           * wasm32-wasixv2: WASIX v2, using the libc2
+                                 sysroot and the 22.x LLVM fork. No PIC,
+                                 dynamic linking or legacy exceptions.
+                                 WASM_EXCEPTIONS=no selects its asyncify
+                                 configuration, which programs that fork
+                                 need; C++ has no exceptions there.
+                           Passing `--target=wasm32-wasixv2` to the compiler
+                           also selects v2. Other `--target` values are
+                           ignored. wasixccenv uses TARGET to decide what
+                           to download and which sysroot to print.
   SYSROOT=<PATH>           Set the sysroot location directly. The sysroot
                            needs to have the same configuration as expected
                            by wasixcc. It's *HIGHLY* recommended to use
@@ -270,11 +303,17 @@ The following configuration options are available:
                              - 'sysroot-exnref-ehpic'
                              - 'sysroot-eh'
                              - 'sysroot-ehpic'
+                           For TARGET=wasm32-wasixv2, the sysroot is the
+                           'sysroot-wasixv2' subdirectory instead, or
+                           'sysroot-wasixv2-asyncify' for
+                           WASM_EXCEPTIONS=no.
   LLVM_LOCATION=<PATH>     Set the location of LLVM toolchain which will be
                            invoked without a version suffix. The path must
                            point to the installation directory of the
                            toolchain, NOT the bin directory inside it; tools
                            will be executed from LLVM_LOCATION/bin/tool-name.
+                           Defaults to ~/.wasixcc/llvm, or to
+                           ~/.wasixcc/llvm-wasixv2 for wasm32-wasixv2.
   BINARYEN_LOCATION=<PATH> Set the location of the binaryen installation,
                            which will be used to invoke the wasm-opt binary.
   COMPILER_FLAGS=<FLAGS>   Extra flags to pass to the compiler, separated
@@ -326,7 +365,10 @@ The following configuration options are available:
                                  backend in Wasmer)
                            * `--asyncify` for modules without exception
                                  handling enabled, required for forks and
-                                 setjmp/longjmp to work
+                                 setjmp/longjmp to work. For
+                                 wasm32-wasixv2, only code that reaches
+                                 the imports that unwind (clone,
+                                 stack_save, checkpoint) is instrumented
   WASM_OPT_PRESERVE_UNOPTIMIZED=<BOOL>
                            Whether to preserve a copy of the unoptimized
                            artifact before running wasm-opt. If the wasm-opt
@@ -404,6 +446,15 @@ The following configuration options are available:
                            in errors if the flags are not supported.
                            Setting this option to `yes` will cause some known
                            unsupported flags and settings to be discarded.
+  PURE=<BOOL>              Pass the arguments of wasixcc, wasix++ and wasixld
+                           through to clang, clang++ and wasm-ld unchanged,
+                           adding no flags, sysroot or post-processing, and
+                           print their --version without the wasixcc banner.
+                           Only TARGET (including a --target=wasm32-wasixv2
+                           argument) and LLVM_LOCATION apply, to find the
+                           tools. For building the libc and other low-level
+                           code with the same toolchain wasixcc uses. wasixar,
+                           wasixranlib and wasixnm always pass through.
   AUTOCONF_WORKAROUNDS=<BOOL>
                            Attempt to detect autoconf tests and run workarounds
                            to make them behave as intended. conftests for functions

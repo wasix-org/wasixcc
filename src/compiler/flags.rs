@@ -1,5 +1,5 @@
 use crate::{
-    args::UserSettings,
+    args::{Target, UserSettings},
     compiler::{
         BuildSettings, DebugLevel, LinkToken, ModuleKind, OptLevel, PreparedArgs,
         WasmExceptionStyle, response_file,
@@ -65,6 +65,7 @@ static CLANG_FLAGS_TO_FORWARD_TO_WASM_LD: LazyLock<HashSet<&str>> =
     LazyLock::new(|| ["-L", "-l"].into());
 
 // A set of non-default WA features supported by Cranelift/LLVM Wasmer compilers.
+// v1 only: the wasm32-wasixv2 driver enables these (and more) by default.
 static DEFAULT_WASM_CLANG_FLAGS: &[&str] = &["-msimd128", "-mrelaxed-simd", "-mextended-const"];
 
 // We always specify values for these flags according to the build configuration, so
@@ -168,6 +169,10 @@ fn update_build_settings_from_compiler_flag(
     build_settings: &mut BuildSettings,
     user_settings: &mut UserSettings,
 ) {
+    // On v2 the driver owns the exception handling and TLS defaults, and the
+    // single v2 sysroot does not depend on them, so these flags only pass
+    // through to clang instead of changing wasixcc's settings.
+    let v2 = user_settings.target.is_v2();
     match compiler_arg {
         Flag::Simple("-O0") => build_settings.opt_level = OptLevel::O0,
         Flag::Simple("-O1" | "-O") => build_settings.opt_level = OptLevel::O1,
@@ -180,16 +185,18 @@ fn update_build_settings_from_compiler_flag(
         Flag::Simple("-g1") => build_settings.debug_level = DebugLevel::G1,
         Flag::Simple("-g2" | "-g") => build_settings.debug_level = DebugLevel::G2,
         Flag::Simple("-g3") => build_settings.debug_level = DebugLevel::G3,
-        Flag::Simple("-fwasm-exceptions") => {
+        Flag::Simple("-fwasm-exceptions") if !v2 => {
             user_settings.wasm_exceptions = WasmExceptionStyle::Exnref
         }
-        Flag::Simple("-fno-exceptions") => user_settings.wasm_exceptions = WasmExceptionStyle::Off,
+        Flag::Simple("-fno-exceptions") if !v2 => {
+            user_settings.wasm_exceptions = WasmExceptionStyle::Off
+        }
         // The link stage invokes wasm-ld directly, so remember the compiler
         // driver's OpenMP runtime request and translate it in build_link_args.
         Flag::Simple("-fopenmp" | "-fopenmp=libomp") => build_settings.openmp = true,
         Flag::Simple("-fno-openmp") => build_settings.openmp = false,
-        Flag::Simple("-fPIC") => user_settings.pic = true,
-        Flag::Simple("-fno-PIC") => user_settings.pic = false,
+        Flag::Simple("-fPIC") if !v2 => user_settings.pic = true,
+        Flag::Simple("-fno-PIC") if !v2 => user_settings.pic = false,
         Flag::Simple("--wasm-opt") => build_settings.use_wasm_opt = true,
         Flag::Simple("--no-wasm-opt") => build_settings.use_wasm_opt = false,
         Flag::Simple("-c" | "-S" | "-E") => {
@@ -216,6 +223,19 @@ fn update_build_settings_from_linker_flag(linker_flag: &Flag, user_settings: &mu
             user_settings.module_kind = Some(ModuleKind::DynamicMain);
         }
         _ => {}
+    }
+}
+
+// A `--target`/`-target` naming wasm32-wasixv2 selects v2 for this
+// invocation, taking precedence over the TARGET setting. Other values are
+// discarded later on, as before, and leave the configured target alone.
+fn select_target_from_flags(flags: &[Flag], user_settings: &mut UserSettings) {
+    for flag in flags {
+        if let Flag::WithValue("--target" | "-target", value, _) = flag
+            && let Some(target) = Target::from_target_arg(value)
+        {
+            user_settings.set_target(target);
+        }
     }
 }
 
@@ -481,13 +501,21 @@ pub(super) fn prepare_compiler_args(
         relocatable: false,
     };
 
-    let args = DEFAULT_WASM_CLANG_FLAGS
-        .iter()
-        .map(|flag| (*flag).to_owned())
-        .chain(add_extra_compiler_flags(args, user_settings, run_cxx));
+    let args = add_extra_compiler_flags(args, user_settings, run_cxx);
     let args = resolve_response_files(args)?;
 
     let flags = lex_compiler_args(args.iter())?;
+
+    select_target_from_flags(&flags, user_settings);
+
+    let default_flags = match user_settings.target {
+        Target::Wasix => DEFAULT_WASM_CLANG_FLAGS,
+        Target::WasixV2 => &[],
+    };
+    let flags = default_flags
+        .iter()
+        .map(|flag| Flag::Simple(flag))
+        .chain(flags);
 
     let CompilerFlagResult {
         compiler_args,
@@ -1113,5 +1141,66 @@ mod tests {
         assert_eq!(pa.linker_flags(), vec!["-L/some/path".to_string()]);
         assert_eq!(pa.output, Some(PathBuf::from("output.wasm")));
         assert_eq!(pa.linker_inputs(), vec![PathBuf::from("input.o")]);
+    }
+
+    #[test]
+    fn test_target_arg_selects_wasixv2() {
+        for args in [
+            vec!["--target=wasm32-wasixv2", "in.c"],
+            vec!["--target=wasm32-unknown-wasixv2", "in.c"],
+            vec!["-target", "wasm32-wasixv2", "in.c"],
+        ] {
+            let mut us = UserSettings::default();
+            let (pa, _) =
+                prepare_compiler_args(args.iter().map(|a| a.to_string()), &mut us, false).unwrap();
+            assert_eq!(us.target, Target::WasixV2, "{args:?}");
+            // The flag itself is still discarded; wasixcc passes its own.
+            // v2 gets no v1 default feature flags either.
+            assert!(pa.compiler_args.is_empty(), "{:?}", pa.compiler_args);
+            assert_eq!(pa.compiler_inputs, vec![PathBuf::from("in.c")]);
+        }
+    }
+
+    #[test]
+    fn test_other_target_args_keep_configured_target() {
+        // v1 build systems (e.g. wasix-toolchain.cmake) pass a wasi triple;
+        // that keeps v1 by default...
+        for target in ["wasm32-wasi", "wasm32-wasmer-wasi", "wasm32-wasip1"] {
+            let mut us = UserSettings::default();
+            let args = vec![format!("--target={target}"), "in.c".to_string()];
+            prepare_compiler_args(args, &mut us, false).unwrap();
+            assert_eq!(us.target, Target::Wasix, "{target}");
+        }
+
+        // ... and does not override an explicit TARGET=wasm32-wasixv2.
+        let mut us = UserSettings::default();
+        us.set_target(Target::WasixV2);
+        let args = vec!["--target=wasm32-wasi".to_string(), "in.c".to_string()];
+        prepare_compiler_args(args, &mut us, false).unwrap();
+        assert_eq!(us.target, Target::WasixV2);
+    }
+
+    #[test]
+    fn test_target_arg_from_compiler_flags_setting() {
+        let mut us = UserSettings {
+            extra_compiler_flags: vec!["--target=wasm32-wasixv2".to_string()],
+            ..Default::default()
+        };
+        prepare_compiler_args(vec!["in.c".to_string()], &mut us, false).unwrap();
+        assert_eq!(us.target, Target::WasixV2);
+    }
+
+    #[test]
+    fn test_v2_eh_and_pic_flags_pass_through_without_changing_settings() {
+        let mut us = UserSettings::default();
+        us.set_target(Target::WasixV2);
+        let args = ["-fno-exceptions", "-fPIC", "-fwasm-exceptions", "in.c"];
+        let (pa, _) =
+            prepare_compiler_args(args.iter().map(|a| a.to_string()), &mut us, false).unwrap();
+        assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
+        assert!(!us.pic);
+        assert_eq!(us.module_kind(), ModuleKind::StaticMain);
+        // -fwasm-exceptions is still discarded: it would turn wasm SjLj off.
+        assert_eq!(pa.compiler_args, vec!["-fno-exceptions", "-fPIC"]);
     }
 }

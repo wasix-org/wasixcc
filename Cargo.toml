@@ -29,6 +29,7 @@ download = [
     "dep:flate2",
     "dep:fs_extra",
     "dep:reqwest",
+    "dep:ring",
     "dep:rustls",
     "dep:rustls-native-certs",
     "dep:serde",
@@ -61,6 +62,8 @@ reqwest = { version = "0.12.22", default-features = false, features = [
     "json",
     "rustls-tls-manual-roots-no-provider",
 ], optional = true }
+# Already in the tree through rustls; used directly to verify download checksums.
+ring = { version = "0.17.14", default-features = false, optional = true }
 rustls = { version = "0.23.35", default-features = false, features = [
     "logging",
     "ring",

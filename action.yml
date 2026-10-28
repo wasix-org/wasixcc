@@ -17,6 +17,11 @@ inputs:
     required: false
     default: ""
 
+  target:
+    description: "Platform to set up: wasm32-wasi (WASIX v1) or wasm32-wasixv2 (WASIX v2). With wasm32-wasixv2, the v2 LLVM and sysroot are installed and WASIXCC_TARGET is exported for later steps."
+    required: false
+    default: "wasm32-wasi"
+
   sysroot-tag:
     description: "Tag of wasix-libc sysroot to install (e.g., v2025-01-01.1, latest)."
     required: false
@@ -26,6 +31,16 @@ inputs:
     description: "Tag of LLVM toolchain to install (e.g., v2025-01-01.1, latest)."
     required: false
     default: "latest"
+
+  wasixv2-sysroot-tag:
+    description: "With target wasm32-wasixv2: tag of the libc2 sysroot to install, or 'pinned' for the release wasixcc is pinned to."
+    required: false
+    default: "pinned"
+
+  wasixv2-llvm-tag:
+    description: "With target wasm32-wasixv2: tag of the LLVM 22.x toolchain to install, or 'pinned' for the release wasixcc is pinned to."
+    required: false
+    default: "pinned"
 
   binaryen-tag:
     description: "Tag/version of binaryen to install (e.g., version_118, latest)."
@@ -107,6 +122,31 @@ runs:
             exit 1
           fi
         fi
+
+    - name: Resolve target
+      id: target
+      shell: sh
+      run: |
+        case "${{ inputs.target }}" in
+          wasm32-wasi)
+            echo "settings=" >> $GITHUB_OUTPUT
+            echo "sysroot-tag=${{ inputs.sysroot-tag }}" >> $GITHUB_OUTPUT
+            echo "llvm-tag=${{ inputs.llvm-tag }}" >> $GITHUB_OUTPUT
+            echo "llvm-dir=llvm" >> $GITHUB_OUTPUT
+            ;;
+          wasm32-wasixv2)
+            echo "settings=-sTARGET=wasm32-wasixv2" >> $GITHUB_OUTPUT
+            echo "sysroot-tag=${{ inputs.wasixv2-sysroot-tag }}" >> $GITHUB_OUTPUT
+            echo "llvm-tag=${{ inputs.wasixv2-llvm-tag }}" >> $GITHUB_OUTPUT
+            echo "llvm-dir=llvm-wasixv2" >> $GITHUB_OUTPUT
+            # Later steps build for v2 without passing -sTARGET themselves.
+            echo "WASIXCC_TARGET=wasm32-wasixv2" >> $GITHUB_ENV
+            ;;
+          *)
+            echo "Error: unsupported target '${{ inputs.target }}' (expected wasm32-wasi or wasm32-wasixv2)"
+            exit 1
+            ;;
+        esac
 
     - name: Detect platform
       id: platform
@@ -229,10 +269,12 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        if [ "${{ inputs.sysroot-tag }}" = "latest" ]; then
-          wasixccenv download-sysroot
+        # 'latest' (v1) and 'pinned' (v2) are wasixccenv's defaults.
+        TAG="${{ steps.target.outputs.sysroot-tag }}"
+        if [ "$TAG" = "latest" ] || [ "$TAG" = "pinned" ]; then
+          wasixccenv ${{ steps.target.outputs.settings }} download-sysroot
         else
-          wasixccenv download-sysroot "${{ inputs.sysroot-tag }}"
+          wasixccenv ${{ steps.target.outputs.settings }} download-sysroot "$TAG"
         fi
 
     - name: Install LLVM toolchain
@@ -241,14 +283,16 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        if [ "${{ inputs.llvm-tag }}" = "latest" ]; then
-          wasixccenv download-llvm
+        # 'latest' (v1) and 'pinned' (v2) are wasixccenv's defaults.
+        TAG="${{ steps.target.outputs.llvm-tag }}"
+        if [ "$TAG" = "latest" ] || [ "$TAG" = "pinned" ]; then
+          wasixccenv ${{ steps.target.outputs.settings }} download-llvm
         else
-          wasixccenv download-llvm "${{ inputs.llvm-tag }}"
+          wasixccenv ${{ steps.target.outputs.settings }} download-llvm "$TAG"
         fi
 
         if [ "${{ inputs.add-llvm-path }}" = "true" ]; then
-          LLVM_BIN="$HOME/.wasixcc/llvm/bin"
+          LLVM_BIN="$HOME/.wasixcc/${{ steps.target.outputs.llvm-dir }}/bin"
           if [ -d "$LLVM_BIN" ]; then
             printf "%s\n" "$LLVM_BIN" >> $GITHUB_PATH
             echo "Added LLVM toolchain to PATH: $LLVM_BIN"
