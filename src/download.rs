@@ -14,10 +14,11 @@ const BINARYEN_REPO: &str = "WebAssembly/binaryen";
 // `latest`: the v2 ABI is not stable yet, and the LLVM fork's `latest` release
 // is the 21.x line that v1 uses.
 //
-// The LLVM fork's first 22.x release (22.1.801, tag `22.1.801`). Not published
-// yet; until it is, point -sLLVM_LOCATION at a local build of
-// wasix-org/llvm-project.
-const WASIXV2_LLVM_TAG: &str = "22.1.801";
+// The LLVM fork's 22.x release (22.1.802, tag `22.1.802`, made from
+// `wasixrel-22.1.802`): the first whose clang defines __linux__ for
+// wasm32-wasixv2. Not published yet; until it is, point -sLLVM_LOCATION at a
+// local build of wasix-org/llvm-project.
+const WASIXV2_LLVM_TAG: &str = "22.1.802";
 // The libc2 sysroot release. Placeholder for the first release, which is not
 // published yet; until then point -sSYSROOT at a local
 // `wasix2/build-sysroot.sh` build.
