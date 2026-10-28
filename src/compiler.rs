@@ -595,8 +595,9 @@ fn ensure_v2_llvm(user_settings: &UserSettings) -> Result<()> {
     Ok(())
 }
 
-// The first v2 sysroots are C only. Fail up front rather than on a missing
-// C++ header or library.
+// The first v2 sysroots are C only; libc2 builds the C++ runtimes into both
+// sysroots since. Fail up front rather than on a missing C++ header or
+// library.
 fn ensure_v2_libcxx(sysroot_path: &Path) -> Result<()> {
     if !sysroot_path
         .join(V2_SYSROOT_LIB_DIR)
@@ -604,8 +605,9 @@ fn ensure_v2_libcxx(sysroot_path: &Path) -> Result<()> {
         .exists()
     {
         bail!(
-            "C++ is not supported for wasm32-wasixv2 yet: the sysroot at {} has no \
-            libc++ ({V2_SYSROOT_LIB_DIR}/libc++.a)",
+            "The wasm32-wasixv2 sysroot at {} has no libc++ ({V2_SYSROOT_LIB_DIR}/libc++.a), \
+            which C++ programs need: it predates libc2's C++ runtimes, or was built with \
+            --no-cxx. Rebuild it with libc2's `make wasixv2-sysroot`.",
             sysroot_path.display()
         );
     }
@@ -2327,11 +2329,11 @@ mod tests {
         let err = rendered_link_args_v2(&state, empty.path()).unwrap_err();
         assert!(format!("{err}").contains(V2_BUILTINS_LIB), "{err}");
 
-        // C++ needs libc++, which the C-only sysroot does not have.
+        // C++ needs libc++, which a C-only sysroot does not have.
         let c_only = fake_v2_sysroot(false);
         let state = compiler_args_state_v2(&["main.o"], true);
         let err = rendered_link_args_v2(&state, c_only.path()).unwrap_err();
-        assert!(format!("{err}").contains("C++ is not supported"), "{err}");
+        assert!(format!("{err}").contains("has no libc++"), "{err}");
 
         let with_cxx = fake_v2_sysroot(true);
         let args = rendered_link_args_v2(&state, with_cxx.path()).unwrap();

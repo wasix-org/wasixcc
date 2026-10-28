@@ -282,11 +282,11 @@ The following configuration options are available:
                            * wasm32-wasi (default): WASIX v1, using the
                                  wasix-libc sysroots
                            * wasm32-wasixv2: WASIX v2, using the libc2
-                                 sysroot and the 22.x LLVM fork. C only
-                                 for now; no PIC, dynamic linking or
-                                 legacy exceptions. WASM_EXCEPTIONS=no
-                                 selects its asyncify configuration,
-                                 which programs that fork need.
+                                 sysroot and the 22.x LLVM fork. No PIC,
+                                 dynamic linking or legacy exceptions.
+                                 WASM_EXCEPTIONS=no selects its asyncify
+                                 configuration, which programs that fork
+                                 need; C++ has no exceptions there.
                            Passing `--target=wasm32-wasixv2` to the compiler
                            also selects v2. Other `--target` values are
                            ignored. wasixccenv uses TARGET to decide what

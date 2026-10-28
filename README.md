@@ -269,9 +269,16 @@ well. `download-sysroot` does not fetch that sysroot yet.
 Programs get an 8 MiB stack, as with v1; override it with
 `-Wl,-z,stack-size=<bytes>`.
 
-v2 is C only for now. These fail with an error instead of producing broken
-output: linking C++ (until the sysroot ships libc++), `PIC`, dynamic linking
-(`-shared`, `-pie`, `MODULE_KIND=dynamic-main|shared-library`),
+C++ programs build with `wasix++`, which links libc++ and libc++abi from the
+sysroot (libc2 builds them into both sysroots; an older, C-only sysroot gives
+an error instead). In the default configuration C++ exceptions are wasm
+exceptions (exnref). The asyncify configuration has no C++ exceptions, as
+asyncify cannot instrument wasm exception handling: code is compiled with
+`-fno-exceptions`, so `throw` and `try` do not compile, and where libc++ would
+throw (`std::bad_alloc`, `std::vector::at`, ...) the program aborts.
+
+These fail with an error instead of producing broken output: `PIC`, dynamic
+linking (`-shared`, `-pie`, `MODULE_KIND=dynamic-main|shared-library`),
 `WASM_EXCEPTIONS=legacy`, `GENERATE_SHELL_SCRIPT` and `-fopenmp`.
 
 ## Integration with build systems

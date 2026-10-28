@@ -1,5 +1,5 @@
-//! End-to-end test for `TARGET=wasm32-wasixv2`: compiles and links a C program
-//! with the real toolchain and checks the module's imports.
+//! End-to-end tests for `TARGET=wasm32-wasixv2`: compile and link C and C++
+//! programs with the real toolchain and check the modules' imports.
 //!
 //! It needs the v2 LLVM fork and the libc2 sysroot, found the same way wasixcc
 //! finds them (`WASIXCC_LLVM_LOCATION` or `~/.wasixcc/llvm-wasixv2`,
@@ -145,15 +145,88 @@ fn compile_and_link_c_for_wasixv2() {
     }
 }
 
+const CXX_PROGRAM: &str = r#"
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+
+static int parse(const std::string &text) { return std::stoi(text); }
+
+int main() {
+    int value = 0;
+    try {
+        value = parse("not a number");
+    } catch (const std::invalid_argument &) {
+        value = 42;
+    }
+    std::thread worker([&] { value += 1; });
+    worker.join();
+    std::cout << "hello from wasixv2 C++: " << value << std::endl;
+    return value == 43 ? 0 : 1;
+}
+"#;
+
+fn has_libcxx() -> bool {
+    sysroot_location()
+        .join("lib/wasm32-wasixv2/libc++.a")
+        .exists()
+}
+
+#[test]
+fn compile_and_link_cxx_for_wasixv2() {
+    if !toolchain_available() {
+        return;
+    }
+    if !has_libcxx() {
+        eprintln!("skipping: the sysroot has no libc++");
+        return;
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let dir = dir.path();
+    std::fs::write(dir.join("hello.cpp"), CXX_PROGRAM).unwrap();
+
+    // One step, and a separate compile and link as build systems do.
+    let mut command = tool(dir, "wasix++");
+    command.args([
+        "-sTARGET=wasm32-wasixv2",
+        "-O1",
+        "hello.cpp",
+        "-o",
+        "a.wasm",
+    ]);
+    run(command);
+    let mut command = tool(dir, "wasix++");
+    command.args([
+        "--target=wasm32-wasixv2",
+        "-c",
+        "hello.cpp",
+        "-o",
+        "hello.o",
+    ]);
+    run(command);
+    let mut command = tool(dir, "wasix++");
+    command.args(["--target=wasm32-wasixv2", "hello.o", "-o", "b.wasm"]);
+    run(command);
+
+    for wasm in ["a.wasm", "b.wasm"] {
+        let bytes = std::fs::read(dir.join(wasm)).unwrap();
+        for (module, name) in imports(&bytes) {
+            assert!(
+                (module == "env" && name == "memory") || module == "wasixv2",
+                "{wasm} has an unexpected import {module}.{name}"
+            );
+        }
+    }
+}
+
 #[test]
 fn cxx_link_without_libcxx_fails_clearly() {
     if !toolchain_available() {
         return;
     }
-    if sysroot_location()
-        .join("lib/wasm32-wasixv2/libc++.a")
-        .exists()
-    {
+    if has_libcxx() {
         eprintln!("skipping: the sysroot has libc++");
         return;
     }
@@ -177,13 +250,13 @@ fn cxx_link_without_libcxx_fails_clearly() {
     ]);
     run(command);
 
-    // ...but linking C++ needs libc++, which the sysroot does not have yet.
+    // ...but linking C++ needs libc++, which this sysroot does not have.
     let mut command = tool(dir, "wasix++");
     command.args(["--target=wasm32-wasixv2", "plain.cpp", "-o", "plain.wasm"]);
     let output = command.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
-    assert!(stderr.contains("C++ is not supported"), "{stderr}");
+    assert!(stderr.contains("has no libc++"), "{stderr}");
 }
 
 /// The (module, name) pairs of a wasm module's imports.
