@@ -53,7 +53,7 @@ const V2_ASYNCIFY_COMPILE_FLAGS: &[&str] = &["-fno-exceptions", "-mno-exception-
 // The v2 imports that unwind the stack in the asyncify configuration; asyncify
 // instruments only the code that can reach them.
 const V2_ASYNCIFY_IMPORTS: &str =
-    "asyncify-imports@wasixv2.clone,wasixv2.stack_save,wasixv2.checkpoint";
+    "asyncify-imports@wasixv2.clone,wasixv2.clone3,wasixv2.stack_save,wasixv2.checkpoint";
 
 // Where the v2 sysroot keeps crt and libraries. The driver searches only this
 // multiarch directory, not plain lib/.
