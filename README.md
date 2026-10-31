@@ -394,3 +394,9 @@ and own libc; side DSOs omit crt/default libc and resolve against that main. The
 matching runtime must implement live loading and atomic peer publication before
 plugins can execute. This source profile rejects asyncify PIC and does not imply
 RTLD_LAZY, RTLD_NEXT, browser or cross-module fork support.
+
+The current bounded PIC producer proof uses `main(int, char **, char **)`.
+Other C main forms encounter libc's strong archive fallback definitions when the
+whole-libc export profile is used; this is an explicit source-profile limitation.
+Static/default main forms are unchanged. No alternative startup/archive strategy
+is implied by the PIC profile.

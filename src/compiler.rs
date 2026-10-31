@@ -789,7 +789,7 @@ fn build_link_args_v2(
                 "--export-dynamic",
                 "--export-all",
                 "--export-memory",
-                "--export-table",
+                "--export-if-defined=__indirect_function_table",
             ]);
         } else {
             args.push(OsString::from("-nostartfiles"));
@@ -811,10 +811,13 @@ fn build_link_args_v2(
     // SIG_HOLD, and the wasixv2 ABI (signal-callback-register) passes signal
     // handlers as table indices. wasm-ld's default table base of 1 would put
     // the first address-taken function at SIG_IGN. Index 0 stays null, as
-    // always. Side modules receive their table base from the host loader.
+    // always. PIC modules receive their table base from the host loader.
     for flag in ["-z", "stack-size=8388608", "--table-base=3"]
         .into_iter()
-        .filter(|_| !matches!(kind, ModuleKind::SharedLibrary))
+        .filter(|flag| {
+            !matches!(kind, ModuleKind::SharedLibrary)
+                && (!kind.requires_pic() || *flag != "--table-base=3")
+        })
     {
         args.push(OsString::from("-Xlinker"));
         args.push(OsString::from(flag));
@@ -2439,13 +2442,18 @@ mod tests {
         for flag in [
             "--experimental-pic",
             "-pie",
-            "--export-table",
+            "--export-if-defined=__indirect_function_table",
             "--export-all",
             "--whole-archive",
             "--export-if-defined=__c_longjmp",
         ] {
             assert!(flags.iter().any(|f| f == flag), "{flag}: {flags:?}");
         }
+        assert!(
+            !flags
+                .iter()
+                .any(|f| f == "--table-base=3" || f == "--export-table")
+        );
         let side = compiler_args_state_v2(&["-shared", "plugin.o"], false);
         let flags = rendered_link_args_v2(&side, Path::new("/empty")).unwrap();
         for flag in [
