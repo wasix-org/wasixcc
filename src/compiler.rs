@@ -504,6 +504,17 @@ fn build_compile_args_v2(state: &State, sysroot_path: &Path) -> Vec<OsString> {
         return command_args;
     }
 
+    if state.user_settings.pic {
+        command_args.extend(
+            [
+                "-fPIC",
+                "-ftls-model=global-dynamic",
+                "-fvisibility=default",
+            ]
+            .map(OsString::from),
+        );
+    }
+
     // -fno-exceptions turns the driver's whole EH default off, wasm SjLj
     // included. setjmp is lowered by the compiler on v2 (libc2 has no
     // callable setjmp), so any object calling it would then fail to link.
@@ -627,17 +638,10 @@ fn check_v2_supported(user_settings: &UserSettings, build_settings: &BuildSettin
             exception handling, or none in the asyncify configuration (WASM_EXCEPTIONS=no)"
         ),
     }
-    if let kind @ (ModuleKind::DynamicMain | ModuleKind::SharedLibrary) =
-        user_settings.module_kind()
-    {
+    if user_settings.pic && !matches!(user_settings.wasm_exceptions, WasmExceptionStyle::Exnref) {
         bail!(
-            "Dynamic linking is not supported for {TARGET} yet (module kind {kind:?}, \
-            from -shared, -pie or MODULE_KIND)"
+            "PIC requires native exnref EH for {TARGET}; asyncify dynamic loading is unsupported"
         );
-    }
-    // After the module kind check: dynamic module kinds imply PIC.
-    if user_settings.pic {
-        bail!("PIC is not supported for {TARGET} yet");
     }
     if user_settings.generate_shell_script {
         bail!("GENERATE_SHELL_SCRIPT is not supported for {TARGET} yet");
@@ -766,6 +770,40 @@ fn build_link_args_v2(
     // the builtins from the sysroot instead. crt1 still comes from the driver.
     args.push(OsString::from("-nodefaultlibs"));
 
+    let kind = state.user_settings.module_kind();
+    if kind.requires_pic() {
+        let mut flags = vec![
+            "--experimental-pic",
+            "--export=__wasm_init_tls",
+            "--export=__tls_base",
+            "--export=__tls_size",
+            "--export=__tls_align",
+            "--export-if-defined=__wasm_apply_data_relocs",
+            "--export-if-defined=__wasm_apply_tls_relocs",
+            "--export-if-defined=__c_longjmp",
+            "--export-if-defined=__cpp_exception",
+        ];
+        if matches!(kind, ModuleKind::DynamicMain) {
+            flags.extend([
+                "-pie",
+                "--export-dynamic",
+                "--export-all",
+                "--export-memory",
+                "--export-table",
+            ]);
+        } else {
+            args.push(OsString::from("-nostartfiles"));
+            flags.extend([
+                "-shared",
+                "--no-entry",
+                "--unresolved-symbols=import-dynamic",
+            ]);
+        }
+        for flag in flags {
+            args.extend([OsString::from("-Xlinker"), OsString::from(flag)]);
+        }
+    }
+
     // An 8 MiB stack, as for v1 and the Linux main thread, instead of the
     // driver's 1 MiB. It follows the driver's default and precedes the user's
     // link tokens, so a user `-z stack-size=` still wins.
@@ -773,9 +811,11 @@ fn build_link_args_v2(
     // SIG_HOLD, and the wasixv2 ABI (signal-callback-register) passes signal
     // handlers as table indices. wasm-ld's default table base of 1 would put
     // the first address-taken function at SIG_IGN. Index 0 stays null, as
-    // always. Dynamic linking, where the loader picks the table base, is
-    // rejected for v2 (check_v2_supported).
-    for flag in ["-z", "stack-size=8388608", "--table-base=3"] {
+    // always. Side modules receive their table base from the host loader.
+    for flag in ["-z", "stack-size=8388608", "--table-base=3"]
+        .into_iter()
+        .filter(|_| !matches!(kind, ModuleKind::SharedLibrary))
+    {
         args.push(OsString::from("-Xlinker"));
         args.push(OsString::from(flag));
     }
@@ -801,7 +841,7 @@ fn build_link_args_v2(
         }
     }
 
-    if !no_default_libs {
+    if !no_default_libs && !matches!(kind, ModuleKind::SharedLibrary) {
         let lib_dir = sysroot_path.join(V2_SYSROOT_LIB_DIR);
 
         // The same order the driver uses: C++ runtime, -lpthread -lc, builtins.
@@ -812,7 +852,13 @@ fn build_link_args_v2(
         }
 
         args.push(OsString::from("-lpthread"));
+        if matches!(kind, ModuleKind::DynamicMain) {
+            args.extend(["-Xlinker", "--whole-archive"].map(OsString::from));
+        }
         args.push(OsString::from("-lc"));
+        if matches!(kind, ModuleKind::DynamicMain) {
+            args.extend(["-Xlinker", "--no-whole-archive"].map(OsString::from));
+        }
 
         let builtins = lib_dir.join(V2_BUILTINS_LIB);
         if !builtins.exists() {
@@ -2354,10 +2400,9 @@ mod tests {
             &["-pie", "in.c"],
             &["-Wl,-shared", "in.c"],
         ] {
-            let err = check(&compiler_args_state_v2(args, false)).unwrap_err();
             assert!(
-                format!("{err}").contains("Dynamic linking"),
-                "{args:?}: {err}"
+                check(&compiler_args_state_v2(args, false)).is_ok(),
+                "{args:?}"
             );
         }
         let err = check(&compiler_args_state_v2(&["-fopenmp", "in.c"], false)).unwrap_err();
@@ -2365,9 +2410,6 @@ mod tests {
 
         for (key, value) in [
             ("WASM_EXCEPTIONS", "legacy"),
-            ("PIC", "yes"),
-            ("MODULE_KIND", "dynamic-main"),
-            ("MODULE_KIND", "shared-library"),
             ("GENERATE_SHELL_SCRIPT", "yes"),
         ] {
             let mut user_settings = crate::args::gather_user_settings(
@@ -2386,6 +2428,52 @@ mod tests {
                 "{key}={value}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn test_v2_native_pic_main_and_side_contract() {
+        let root = fake_v2_sysroot(false);
+        let main = compiler_args_state_v2(&["-pie", "main.o"], false);
+        assert!(main.user_settings.pic);
+        let flags = rendered_link_args_v2(&main, root.path()).unwrap();
+        for flag in [
+            "--experimental-pic",
+            "-pie",
+            "--export-table",
+            "--export-all",
+            "--whole-archive",
+            "--export-if-defined=__c_longjmp",
+        ] {
+            assert!(flags.iter().any(|f| f == flag), "{flag}: {flags:?}");
+        }
+        let side = compiler_args_state_v2(&["-shared", "plugin.o"], false);
+        let flags = rendered_link_args_v2(&side, Path::new("/empty")).unwrap();
+        for flag in [
+            "-nostartfiles",
+            "-shared",
+            "--unresolved-symbols=import-dynamic",
+            "--export=__wasm_init_tls",
+        ] {
+            assert!(flags.iter().any(|f| f == flag), "{flag}: {flags:?}");
+        }
+        assert!(
+            !flags
+                .iter()
+                .any(|f| f == "-lc" || f == "--table-base=3" || f.ends_with(V2_BUILTINS_LIB))
+        );
+        let compile = build_compile_args_v2(&side, Path::new("/p"));
+        assert!(compile.iter().any(|f| f == "-fPIC"));
+        assert!(compile.iter().any(|f| f == "-ftls-model=global-dynamic"));
+        let mut settings = main.user_settings;
+        settings.sysroot_prefix = PathBuf::from("/p");
+        settings.sysroot_location = None;
+        assert_eq!(
+            settings.sysroot_location().unwrap(),
+            PathBuf::from("/p/sysroot-wasixv2-ehpic")
+        );
+        settings.wasm_exceptions = WasmExceptionStyle::Off;
+        assert!(check_v2_supported(&settings, &main.build_settings).is_err());
+        assert!(settings.sysroot_location().is_err());
     }
 
     #[test]

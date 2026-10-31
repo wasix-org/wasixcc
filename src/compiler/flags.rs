@@ -195,8 +195,8 @@ fn update_build_settings_from_compiler_flag(
         // driver's OpenMP runtime request and translate it in build_link_args.
         Flag::Simple("-fopenmp" | "-fopenmp=libomp") => build_settings.openmp = true,
         Flag::Simple("-fno-openmp") => build_settings.openmp = false,
-        Flag::Simple("-fPIC") if !v2 => user_settings.pic = true,
-        Flag::Simple("-fno-PIC") if !v2 => user_settings.pic = false,
+        Flag::Simple("-fPIC") => user_settings.pic = true,
+        Flag::Simple("-fno-PIC") => user_settings.pic = false,
         Flag::Simple("--wasm-opt") => build_settings.use_wasm_opt = true,
         Flag::Simple("--no-wasm-opt") => build_settings.use_wasm_opt = false,
         Flag::Simple("-c" | "-S" | "-E") => {
@@ -1191,15 +1191,15 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_eh_and_pic_flags_pass_through_without_changing_settings() {
+    fn test_v2_pic_selects_dynamic_profile_and_keeps_native_eh() {
         let mut us = UserSettings::default();
         us.set_target(Target::WasixV2);
         let args = ["-fno-exceptions", "-fPIC", "-fwasm-exceptions", "in.c"];
         let (pa, _) =
             prepare_compiler_args(args.iter().map(|a| a.to_string()), &mut us, false).unwrap();
         assert_eq!(us.wasm_exceptions, WasmExceptionStyle::Exnref);
-        assert!(!us.pic);
-        assert_eq!(us.module_kind(), ModuleKind::StaticMain);
+        assert!(us.pic);
+        assert_eq!(us.module_kind(), ModuleKind::DynamicMain);
         // -fwasm-exceptions is still discarded: it would turn wasm SjLj off.
         assert_eq!(pa.compiler_args, vec!["-fno-exceptions", "-fPIC"]);
     }

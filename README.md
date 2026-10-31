@@ -380,3 +380,17 @@ The download stack (`wasixccenv download-*` / `aio-install`) sits behind the
 default-on `download` feature. The WASIX build turns it off — inside the
 Wasmer package, clang and the sysroot come from `wasmer/clang`, so there is
 nothing to download and no reason to link a TLS stack.
+
+### WASIX v2 native dynamic source profile
+
+The source driver accepts native exnref EH/PIC (`-pie`, `-shared`, or `PIC=yes`)
+and selects an explicitly source-built `sysroot-wasixv2-ehpic` sibling. Existing
+downloaded sysroots do not include that profile. Build it separately with libc2's
+`wasixv2/build-sysroot.sh --config ehpic` and a private output directory; this does
+not require changing installed binaries or sysroots.
+
+Dynamic mains export the shared memory/table, symbols and TLS/relocation helpers,
+and own libc; side DSOs omit crt/default libc and resolve against that main. The
+matching runtime must implement live loading and atomic peer publication before
+plugins can execute. This source profile rejects asyncify PIC and does not imply
+RTLD_LAZY, RTLD_NEXT, browser or cross-module fork support.

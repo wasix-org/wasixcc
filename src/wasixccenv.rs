@@ -282,7 +282,8 @@ The following configuration options are available:
                            * wasm32-wasi (default): WASIX v1, using the
                                  wasix-libc sysroots
                            * wasm32-wasixv2: WASIX v2, using the libc2
-                                 sysroot and the 22.x LLVM fork. No PIC,
+                                 sysroot and the 22.x LLVM fork. Native EH/PIC uses an explicitly
+                                 source-built sysroot-wasixv2-ehpic; no asyncify PIC,
                                  dynamic linking or legacy exceptions.
                                  WASM_EXCEPTIONS=no selects its asyncify
                                  configuration, which programs that fork

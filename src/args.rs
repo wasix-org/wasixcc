@@ -226,10 +226,16 @@ impl UserSettings {
             Ok(sysroot.to_owned())
         } else if self.target.is_v2() {
             // One sysroot per v2 build configuration: exception handling
-            // (the default), or asyncify without it. PIC is not supported yet.
-            match self.wasm_exceptions {
-                WasmExceptionStyle::Off => Ok(self.sysroot_prefix.join("sysroot-wasixv2-asyncify")),
-                _ => Ok(self.sysroot_prefix.join("sysroot-wasixv2")),
+            // (the default), a native EH/PIC archive, or asyncify without EH.
+            match (self.wasm_exceptions, self.pic) {
+                (WasmExceptionStyle::Off, true) => {
+                    bail!("PIC without native EH is not supported for wasm32-wasixv2")
+                }
+                (WasmExceptionStyle::Off, false) => {
+                    Ok(self.sysroot_prefix.join("sysroot-wasixv2-asyncify"))
+                }
+                (_, true) => Ok(self.sysroot_prefix.join("sysroot-wasixv2-ehpic")),
+                (_, false) => Ok(self.sysroot_prefix.join("sysroot-wasixv2")),
             }
         } else {
             match (self.wasm_exceptions, self.pic) {
